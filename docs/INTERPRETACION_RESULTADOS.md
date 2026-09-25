@@ -10,22 +10,22 @@ Distribución actual: {'0': 91585, '1': 8415}. El porcentaje de incidencias repo
 Si hay pocas incidencias, un modelo puede acertar muchos aceptados y aun así fallar en detectar incidencias. Por eso se priorizan recall, F1 y PR-AUC de la clase 1.
 
 ## Métricas actuales
-- Accuracy: 53.77%
-- Balanced accuracy: 62.63%
-- Precision clase 1: 12.40%
-- Recall clase 1: 73.31%
-- F1 clase 1: 21.21%
-- PR-AUC: 0,1223
-- ROC-AUC: 0,6469
-- Especificidad: 51.96%
-- MCC: 0,1408
-- Falsos positivos: 8792
-- Falsos negativos: 453
-- Umbral: 0.1
+- Accuracy: 57.64%
+- Balanced accuracy: 61.48%
+- Precision clase 1: 12.44%
+- Recall clase 1: 66.12%
+- F1 clase 1: 20.94%
+- PR-AUC: 0,1243
+- ROC-AUC: 0,6484
+- Especificidad: 56.85%
+- MCC: 0,1286
+- Falsos positivos: 7898
+- Falsos negativos: 575
+- Umbral: 0.11
 - Calibración: isotonic
 
 ## Matriz de confusión actual
-`[[9511, 8792], [453, 1244]]`
+`[[10405, 7898], [575, 1122]]`
 
 ## Gráficos
 La matriz de calor Pearson muestra la relacion lineal entre variables candidatas y la incidencia. La matriz de confusion muestra errores y aciertos con el umbral optimizado. La curva Precision-Recall muestra el intercambio entre detectar incidencias y generar alertas. La comparacion de modelos resume el rendimiento interno. El aporte SUNAT permite comparar experimentos con y sin variables tributarias.

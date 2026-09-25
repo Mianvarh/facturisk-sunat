@@ -5,7 +5,7 @@
 - Se incorporó archivo de contexto para otra IA.
 - Se agregó soporte de rutas portables.
 - Se creó verificación inicial.
-- Se mantuvo el modelo activo actual: HistGradientBoostingClassifier (B_con_sunat).
+- Se mantuvo el modelo activo actual: XGBClassifier (B_con_sunat).
 - Se conserva la comparación interna de modelos durante el entrenamiento.
 - Se documentó la incorporación de variables SUNAT.
 - Se documentó la creación de variables históricas sin fuga.

@@ -75,13 +75,13 @@ python .\main.py todo
 - Registros históricos: 150000
 - Registros de entrenamiento: 100000
 - Registros pendientes: 50000
-- Modelo seleccionado actualmente: HistGradientBoostingClassifier (B_con_sunat)
-- Umbral seleccionado: 0.1
-- Recall clase 1: 73.31%
-- F1 clase 1: 21.21%
-- PR-AUC: 0,1223
-- Falsos positivos: 8792
-- Falsos negativos: 453
+- Modelo seleccionado actualmente: XGBClassifier (B_con_sunat)
+- Umbral seleccionado: 0.11
+- Recall clase 1: 66.12%
+- F1 clase 1: 20.94%
+- PR-AUC: 0,1243
+- Falsos positivos: 7898
+- Falsos negativos: 575
 - Confiabilidad: Limitada
 
 ## Uso recomendado

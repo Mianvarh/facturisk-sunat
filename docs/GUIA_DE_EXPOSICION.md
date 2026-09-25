@@ -5,7 +5,7 @@ El proyecto resuelve la priorización de comprobantes electrónicos pre-registra
 
 La variable adicional más importante desde SUNAT es la situación tributaria actual, creada a partir de estado RUC activo y condición habido. MongoDB permite mantener esa información externa actualizada y consultable sin depender solo del CSV local.
 
-El modelo seleccionado actual es HistGradientBoostingClassifier con experimento B_con_sunat y umbral 0.1. El recall de incidencias es 73.31%, el F1 es 21.21% y la PR-AUC es 0,1223. La conclusión es que sirve para priorización manual, no para rechazo automático.
+El modelo seleccionado actual es XGBClassifier con experimento B_con_sunat y umbral 0.11. El recall de incidencias es 66.12%, el F1 es 20.94% y la PR-AUC es 0,1243. La conclusión es que sirve para priorización manual, no para rechazo automático.
 
 ## Exposición completa de 7 minutos
 El problema consiste en revisar comprobantes pendientes de aceptación. La solución construye un pipeline completo: inspección, scraping SUNAT, MongoDB Atlas, preparación, variables históricas sin fuga, entrenamiento con validación temporal, calibración, optimización de umbral y predicción.

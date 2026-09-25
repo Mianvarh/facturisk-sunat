@@ -31,12 +31,19 @@ Companies that process electronic invoices receive thousands of documents that e
 
 1. **Inspects** 150,000 historical invoices: types, dates, RUC validity, nulls and duplicates.
 2. **Processes the history MapReduce-style** in chunks (map → shuffle by RUC → reduce), mirroring how the job would run on Spark.
-3. **Scrapes the official SUNAT reduced registry** (a ~400 MB ZIP), detecting encoding and delimiter automatically and streaming it in chunks to keep only the suppliers in the dataset.
+3. **Scrapes the official SUNAT reduced registry** (a ~400 MB ZIP), detecting encoding and delimiter automatically and streaming it in chunks to keep only the suppliers in the dataset. Optional extra registries (retention agents, good taxpayers, perception agents) are added as 0/1 features.
 4. **Loads the tax snapshot into MongoDB** with idempotent upserts and a unique RUC index, with a local backup when MongoDB is not available.
 5. **Builds leakage-safe features**: supplier history (previous incidents, 30/90-day windows, amount deviation) computed only from earlier invoices.
 6. **Trains and compares 7 models** (Logistic Regression, Random Forest, HistGradientBoosting, XGBoost, LightGBM, CatBoost, plus a baseline) **with and without SUNAT features**, using temporal validation, probability calibration and a threshold tuned for minimum recall.
 7. **Predicts pending invoices**, assigns Low/Medium/High risk and explains the main factors of each prediction.
 8. **Reports** metrics, charts and documentation, and shows everything in a **desktop app with an interactive risk dashboard**.
+
+### Desktop app features
+
+- **Bring your own data:** import a CSV or Excel history; delimiter, encoding and columns are detected automatically, even when headers are swapped (the RUC column is found by its content). Imported data stays local.
+- **Configurable external sources:** change the SUNAT registry page, use a direct ZIP link or an already downloaded file, and choose which extra SUNAT registries become model features.
+- **MongoDB from the panel:** enter the connection (Atlas or local), test it and save it locally; it takes precedence over `.env` and is never committed.
+- **Interactive dashboard:** tooltips on every chart, click a risk level, voucher type, supplier or risk factor to filter the priority table, free-text search, CSV export and a full detail sheet per invoice. With local data it shows company names, fiscal addresses and registry flags; a *hide names* switch masks them for screenshots.
 
 ## Architecture
 
@@ -62,13 +69,13 @@ Evaluated on the most recent 20% of the invoices (chronological hold-out test se
 
 | Metric | Value | Reading |
 |---|---:|---|
-| Selected model | HistGradientBoosting + SUNAT features | Best validation PR-AUC |
-| PR-AUC | **0.122** | 1.4× the no-skill baseline (0.088 = incident rate) |
-| Recall (incidents) | **73.3%** | Share of real incidents caught |
+| Selected model | XGBoost + SUNAT features | Best validation PR-AUC |
+| PR-AUC | **0.124** | 1.4× the no-skill baseline (0.088 = incident rate) |
+| Recall (incidents) | **66.1%** | Share of real incidents caught |
 | Precision (incidents) | 12.4% | Flagged invoices that are real incidents |
-| Invoices flagged for review | 50.2% | Review effort at the chosen threshold |
+| Invoices flagged for review | 45.1% | Review effort at the chosen threshold |
 
-**Honest assessment:** the signal is real but **limited**. Reviewing the top half catches almost three out of four incidents, but precision is low, and the SUNAT features add only a small gain over supplier history alone. Those findings are documented rather than hidden. `outputs/comparacion_aporte_sunat.csv` quantifies the SUNAT contribution per model.
+**Honest assessment:** the signal is real but **limited**. Reviewing 45% of the pending invoices catches two out of three incidents, but precision is low. The SUNAT features add only a small gain over supplier history alone, and the extra registries (retention agents, good taxpayers, perception agents) have a permutation importance of practically zero on this dataset: they are kept as configurable options, not presented as an improvement. `outputs/comparacion_aporte_sunat.csv` quantifies the SUNAT contribution per model.
 
 ## Screenshots
 
@@ -77,9 +84,15 @@ Evaluated on the most recent 20% of the invoices (chronological hold-out test se
 | <img src="docs/images/ml.png" alt="Machine learning module" width="100%"> | <img src="docs/images/compacto.png" alt="Compact responsive layout" width="100%"> |
 
 <details>
-<summary>Dashboard: priority table and risk factors</summary>
+<summary>Dashboard: filterable priority table (names hidden)</summary>
 
 <img src="docs/images/dashboard_detalle.png" alt="Dashboard detail" width="100%">
+</details>
+
+<details>
+<summary>Settings: data import, SUNAT sources and MongoDB</summary>
+
+<img src="docs/images/configuracion.png" alt="Settings panel" width="100%">
 </details>
 
 ## Quick start
@@ -108,6 +121,8 @@ python main.py mongodb                     # upsert suppliers into MongoDB
 ```
 
 Each phase can also run on its own: `inspect`, `distribuido`, `scraping`, `mongodb`, `preparar`, `entrenar`, `predecir`, `documentar`.
+
+Your own data, SUNAT sources and MongoDB credentials are set from **Configuración** in the app. They are stored in `config/app_settings.json`, `config/configuracion.json` and `data/raw/local/`, all excluded from Git.
 
 ## Key technical decisions
 

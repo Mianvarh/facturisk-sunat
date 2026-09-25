@@ -36,9 +36,9 @@
 
 | Columna | Tipo detectado | Ejemplo | Origen | Tratamiento | Uso en modelo | Motivo de exclusión |
 |---|---:|---|---|---|---|---|
-| `Origen` | `str` | PreRegistros | Preparación | Conservada para trazabilidad | No |  |
-| `ID_Comprobante` | `str` | F001-57022055 | Preparación | Conservada para trazabilidad | No |  |
 | `RUC_Proveedor` | `int64` | 20493434340 | Preparación | Conservada para trazabilidad | No |  |
+| `Razon_Social_Proveedor` | `str` |  | Preparación | Conservada para trazabilidad | No |  |
+| `ID_Comprobante` | `str` | F001-57022055 | Preparación | Conservada para trazabilidad | No |  |
 | `Tipo_Comprobante` | `str` | Factura | Preparación | Normalizada/derivada | Sí |  |
 | `Fecha_Creacion` | `str` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
 | `Fecha_Emision` | `str` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
@@ -46,23 +46,7 @@
 | `Fecha_Pago` | `str` | 2025-10-01 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
 | `Moneda` | `str` | PEN | Preparación | Normalizada/derivada | Sí |  |
 | `Importe_Total` | `float64` | 1749.85 | Preparación | Normalizada/derivada | Sí |  |
-| `Estado` | `str` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Grupo` | `str` | Emitida / Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Emision` | `str` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
 | `Estado_Aceptacion` | `str` | Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Pago` | `str` | Pagada | Preparación | Conservada para trazabilidad | No |  |
-| `Flag_Factura` | `int64` | 1 | Preparación | Conservada para trazabilidad | No |  |
-| `Flag_Emitida` | `int64` | 1 | Preparación | Conservada para trazabilidad | No |  |
-| `Flag_Aceptada` | `int64` | 1 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Flag_Observada` | `int64` | 0 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Flag_Rechazada` | `int64` | 0 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Flag_Pendiente_Pago` | `int64` | 0 | Preparación | Conservada para trazabilidad | No |  |
-| `Anio` | `int64` | 2025 | Preparación | Conservada para trazabilidad | No |  |
-| `Trimestre` | `str` | Q3 | Preparación | Conservada para trazabilidad | No |  |
-| `Mes_Num` | `int64` | 8 | Preparación | Conservada para trazabilidad | No |  |
-| `Mes` | `str` | Agosto | Preparación | Conservada para trazabilidad | No |  |
-| `Anio_Mes` | `str` | 2025-08 | Preparación | Conservada para trazabilidad | No |  |
-| `Orden_Anio_Mes` | `int64` | 202508 | Preparación | Conservada para trazabilidad | No |  |
 | `RUC` | `int64` | 20493434340 | Preparación | Conservada para trazabilidad | No |  |
 | `Razon_Social_SUNAT` | `str` |  | Preparación | Conservada para trazabilidad | No |  |
 | `Estado_RUC` | `str` | ACTIVO | Preparación | Normalizada/derivada | Sí |  |
@@ -73,6 +57,10 @@
 | `Fecha_Consulta` | `str` | 2026-09-25 | Preparación | Conservada para trazabilidad | No |  |
 | `Fuente` | `str` | SUNAT - Padrón Reducido | Preparación | Conservada para trazabilidad | No |  |
 | `SUNAT_Encontrado` | `int64` | 1 | Preparación | Normalizada/derivada | Sí |  |
+| `Es_Agente_Retencion` | `int64` | 0 | Preparación | Normalizada/derivada | Sí |  |
+| `Es_Buen_Contribuyente` | `int64` | 0 | Preparación | Normalizada/derivada | Sí |  |
+| `Es_Agente_Percepcion` | `int64` | 0 | Preparación | Normalizada/derivada | Sí |  |
+| `Es_Agente_Percepcion_VI` | `int64` | 0 | Preparación | Normalizada/derivada | Sí |  |
 | `plazo_dias` | `int64` | 60 | Preparación | Normalizada/derivada | Sí |  |
 | `mes_emision` | `int64` | 8 | Preparación | Normalizada/derivada | Sí |  |
 | `anio_emision` | `int64` | 2025 | Preparación | Normalizada/derivada | No |  |

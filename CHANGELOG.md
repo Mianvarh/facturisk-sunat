@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Settings panel: import historical data from CSV or Excel with automatic
+  delimiter, encoding and column detection (including swapped headers);
+  switch back to the demo dataset at any time.
+- Configurable SUNAT source (registry page, direct ZIP URL or local file) and
+  optional extra SUNAT registries as model features: retention agents, good
+  taxpayers and perception agents, with a public snapshot for offline runs.
+- MongoDB connection editable from the panel with a connection test; panel
+  settings take precedence over `.env` and registry flags are uploaded too.
+- Interactive dashboard: tooltips, click-to-filter charts, search, CSV export,
+  invoice detail sheet, registry risk chart and a hide-names switch. Local
+  runs show company names and fiscal addresses.
+- Tests for the importer, settings, registry parser and dashboard filters.
+- New line-art logo: an F drawn with two curved strokes and the risk dot, with
+  thicker strokes at favicon sizes; model names auto-fit their cards.
 - Redesigned desktop interface: new visual identity (logo, favicon, icon set,
   palette), responsive layout that reflows at any window size, and a risk
   dashboard module with KPIs, charts, a priority table and the model chart
