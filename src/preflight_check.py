@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
 import platform
 import shutil
 import socket
@@ -11,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
+from datos import ruta_comprobantes
 from paths import ensure_directories, get_application_root
 
 
@@ -21,23 +19,12 @@ SUNAT_URL = "https://www.sunat.gob.pe/descargaPRR/mrc137_padron_reducido.html"
 
 
 def _load_config() -> dict[str, Any]:
-    """Load non-printed configuration values from .env and portable JSON."""
+    """MongoDB settings resolved like the pipeline does (panel first, then .env)."""
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    config = {
-        "mongodb_uri": os.getenv("MONGODB_URI"),
-        "mongodb_database": os.getenv("MONGODB_DATABASE"),
-        "mongodb_collection": os.getenv("MONGODB_COLLECTION_SUNAT"),
-        "usar_mongodb": True,
-        "permitir_scraping": True,
-    }
-    config_path = PROJECT_ROOT / "config" / "configuracion.json"
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8-sig") as file:
-            file_config = json.load(file)
-        for key, value in file_config.items():
-            config[key] = value if value not in ("", None) else config.get(key)
-    return config
+    from configuracion import cargar_mongo_config
+
+    config = cargar_mongo_config()
+    return {"mongodb_uri": config[0] if config else None, "usar_mongodb": config is not None}
 
 
 def _ok_file(path: Path) -> str:
@@ -95,7 +82,7 @@ def ejecutar_preflight(mostrar: bool = True) -> dict[str, str]:
     config = _load_config()
     checks = {
         "Sistema operativo": "OK" if platform.system().lower() == "windows" else platform.system(),
-        "Dataset historico": _ok_file(PROJECT_ROOT / "data" / "raw" / "comprobantes.parquet"),
+        "Dataset historico": _ok_file(ruta_comprobantes()),
         "Modelo actual": _ok_file(PROJECT_ROOT / "data" / "models" / "modelo_incidencias.joblib"),
         "Datos procesados": _ok_file(PROJECT_ROOT / "data" / "processed" / "dataset_modelo.csv"),
         "Predicciones existentes": _ok_file(PROJECT_ROOT / "data" / "processed" / "predicciones_pendientes.csv"),

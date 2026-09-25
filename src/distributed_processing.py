@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from datos import COMPROBANTES_PATH, iterar_lotes_comprobantes, normalizar_ruc
+from datos import iterar_lotes_comprobantes, normalizar_ruc, ruta_comprobantes
 from paths import ensure_directories, get_application_root
 
 
@@ -220,7 +220,7 @@ def ejecutar_procesamiento_distribuido() -> pd.DataFrame:
 
     ensure_directories()
     configurar_logging()
-    dataset_path = COMPROBANTES_PATH
+    dataset_path = ruta_comprobantes()
     logging.info("Iniciando procesamiento distribuido local: %s", dataset_path)
 
     partials: list[pd.DataFrame] = []

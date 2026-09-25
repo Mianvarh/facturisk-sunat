@@ -11,11 +11,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from datos import COMPROBANTES_PATH, leer_comprobantes
+from datos import leer_comprobantes, ruta_comprobantes
 from paths import ensure_directories, get_application_root
 
 PROJECT_ROOT = get_application_root()
-DEFAULT_DATASET_PATH = COMPROBANTES_PATH
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "outputs" / "inspeccion_dataset.txt"
 
 DATE_COLUMNS = [
@@ -198,7 +197,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser(description="Inspecciona el dataset empresarial.")
-    parser.add_argument("--dataset-path", type=Path, default=DEFAULT_DATASET_PATH)
+    parser.add_argument("--dataset-path", type=Path, default=None)
     parser.add_argument("--report-path", type=Path, default=DEFAULT_REPORT_PATH)
     return parser.parse_args()
 
@@ -208,7 +207,7 @@ def main() -> None:
 
     ensure_directories()
     args = parse_args()
-    dataset_path = args.dataset_path.expanduser().resolve()
+    dataset_path = (args.dataset_path or ruta_comprobantes()).expanduser().resolve()
     report_path = args.report_path.expanduser().resolve()
 
     df = read_dataset(dataset_path)
