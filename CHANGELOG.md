@@ -1,0 +1,59 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Redesigned desktop interface: new visual identity (logo, favicon, icon set,
+  palette), responsive layout that reflows at any window size, and a risk
+  dashboard module with KPIs, charts, a priority table and the model chart
+  gallery.
+- Pipeline charts use the product palette.
+
+## [1.0.0] - 2026-09-25
+
+### Added
+
+- Public release of the academic project as FactuRisk SUNAT, with the desktop
+  interface, the data preparation steps, the training pipeline and the
+  documentation generator.
+- SUNAT snapshot without supplier/customer names or addresses, so the project
+  can be reproduced and run fully offline.
+- Local MongoDB via `docker-compose.yml` for users without a MongoDB Atlas
+  account.
+
+### Changed
+
+- Dataset converted to Parquet (no longer CSV), keeping supplier and customer
+  names out of the distributed data.
+- Prediction now always uses the model whose metrics are reported; the
+  hardcoded replacement thresholds were removed so the reported scores always
+  match the artifact that scores new cases.
+- Feature engineering is faster: the 30/90-day supplier windows are
+  vectorized instead of iterating row by row.
+- The smoothing prior of the supplier incidence rate now uses only invoices
+  from earlier days (it previously used the global rate of the whole dataset,
+  including future outcomes).
+- MongoDB is optional: without configuration the pipeline uses the local
+  scraping backup or the bundled SUNAT snapshot instead of failing.
+- SUNAT encoding and delimiter detection read only a sample instead of the
+  whole ~1.5 GB file.
+- Predictions include the emission date and currency.
+- SUNAT ZIP files are reused based on their age instead of being downloaded
+  again on every run.
+- Probability calibration updated for scikit-learn 1.6+.
+- CatBoost categorical feature handling fixed; the custom transformer lives in
+  its own module so saved models load from any entry point.
+- Charts of pending-invoice risk are generated only from fresh predictions.
+- Test suite (leakage, temporal split, threshold, SUNAT fallback) and a
+  GitHub Actions workflow.
+
+### Removed
+
+- Duplicated legacy files that were kept in parallel with their current
+  equivalents.
