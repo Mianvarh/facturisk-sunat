@@ -20,11 +20,11 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
 import pandas as pd
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from paths import ensure_directories, get_application_root
-from theme import FONT_MONO, PALETTE, configure_styles, model_display_name
-from ui_widgets import NavItem, ResponsiveGrid, ScrollableFrame, card, load_icon
+from theme import FONT_MEDIUM, FONT_MONO, PALETTE, configure_styles, model_display_name
+from ui_widgets import HeroBanner, NavItem, PillButton, ResponsiveGrid, RoundedCard, ScrollableFrame, StatusPill, card, load_icon
 
 PROJECT_ROOT = get_application_root()
 SRC_DIR = PROJECT_ROOT / "src"
@@ -178,12 +178,23 @@ STATUS_STYLES = {
 }
 
 
+APP_USER_MODEL_ID = "Mianvarh.FactuRiskSUNAT.Desktop"
+
+
 def enable_high_dpi() -> None:
-    """Render crisp text on scaled Windows displays."""
+    """Render crisp text on scaled Windows displays and use our own taskbar identity.
+
+    Without an explicit AppUserModelID Windows groups the window under
+    python.exe and shows the Python logo in the taskbar.
+    """
 
     if sys.platform == "win32":
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except (AttributeError, OSError):
+            pass
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
         except (AttributeError, OSError):
             pass
 
@@ -200,12 +211,7 @@ class FactuRiskApp:
         self.root.minsize(760, 560)
         self.root.configure(background=PALETTE["background"])
         self.root.protocol("WM_DELETE_WINDOW", self.close)
-        icon_path = ASSETS_DIR / "facturisk.ico"
-        if icon_path.exists():
-            try:
-                self.root.iconbitmap(str(icon_path))
-            except tk.TclError:
-                pass
+        self.set_window_icon()
 
         self.queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self.worker_thread: threading.Thread | None = None
@@ -238,6 +244,21 @@ class FactuRiskApp:
 
     # ------------------------------------------------------------------- setup
 
+    def set_window_icon(self) -> None:
+        """Window, Alt+Tab and taskbar icon from the product logo."""
+
+        icon_path = ASSETS_DIR / "facturisk.ico"
+        if icon_path.exists():
+            try:
+                self.root.iconbitmap(default=str(icon_path))
+            except tk.TclError:
+                pass
+        logo_path = ASSETS_DIR / "logo.png"
+        if logo_path.exists():
+            logo = Image.open(logo_path).convert("RGBA")
+            self.window_icons = [ImageTk.PhotoImage(logo.resize((size, size), Image.Resampling.LANCZOS)) for size in (256, 64, 32, 16)]
+            self.root.iconphoto(True, *self.window_icons)
+
     def load_icons(self) -> None:
         """Load navigation (light) and card (tinted tile) icons."""
 
@@ -252,6 +273,8 @@ class FactuRiskApp:
         logo = load_icon(ASSETS_DIR / "logo.png", 40)
         if logo:
             self.icons["logo"] = logo
+        logo_path = ASSETS_DIR / "logo.png"
+        self.logo_art = Image.open(logo_path).convert("RGBA") if logo_path.exists() else None
 
     def build_layout(self) -> None:
         self.root.columnconfigure(1, weight=1)
@@ -311,14 +334,10 @@ class FactuRiskApp:
         row += 1
 
         parent.rowconfigure(row, weight=1)
-        self.nav_footer = ttk.Label(
-            parent,
-            text="Fuente externa: SUNAT\nNoSQL: MongoDB\nValidación temporal",
-            style="BrandSub.TLabel",
-            padding=(20, 0, 16, 18),
-            justify="left",
-        )
-        self.nav_footer.grid(row=row + 1, column=0, sticky="sew")
+        self.nav_footer = RoundedCard(parent, padding=(16, 14), radius=16, fill=PALETTE["ink_hover"], background=PALETTE["ink"], inner_style="NavCard.TFrame")
+        ttk.Label(self.nav_footer.inner, text="Pipeline de datos", style="NavCardTitle.TLabel").pack(anchor="w")
+        ttk.Label(self.nav_footer.inner, text="SUNAT · MongoDB · validación temporal", style="NavCardBody.TLabel").pack(anchor="w", pady=(2, 0))
+        self.nav_footer.grid(row=row + 1, column=0, sticky="sew", padx=12, pady=(0, 16))
 
     def build_ml_view(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -329,7 +348,12 @@ class FactuRiskApp:
         self.header.columnconfigure(0, weight=1)
         titles = ttk.Frame(self.header, style="App.TFrame")
         titles.grid(row=0, column=0, sticky="ew")
-        ttk.Label(titles, text="Machine Learning", style="H1.TLabel").pack(anchor="w")
+        title_row = ttk.Frame(titles, style="App.TFrame")
+        title_row.pack(anchor="w")
+        ttk.Label(title_row, text="Machine Learning", style="H1.TLabel").pack(side="left")
+        source_text, source_color = self.describe_sunat_source()
+        self.source_pill = StatusPill(title_row, source_text, source_color)
+        self.source_pill.pack(side="left", padx=(14, 0), pady=(6, 0))
         self.header_subtitle = ttk.Label(
             titles,
             text="Inspección, SUNAT, MongoDB, MapReduce, entrenamiento y predicción de comprobantes pendientes.",
@@ -340,11 +364,9 @@ class FactuRiskApp:
 
         self.actions = ttk.Frame(self.header, style="App.TFrame")
         ttk.Checkbutton(self.actions, text="Forzar descarga SUNAT", variable=self.force_scraping).pack(side="left", padx=(0, 12))
-        self.todo_button = ttk.Button(self.actions, text="Ejecutar todo", style="Primary.TButton", command=lambda: self.run_phase_group("todo"))
-        self.todo_button.pack(side="left", padx=(0, 8))
-        self.stop_button = ttk.Button(self.actions, text="Detener", style="Danger.TButton", command=self.stop_process, state="disabled")
+        self.stop_button = PillButton(self.actions, "Detener", command=self.stop_process, variant="danger", state="disabled")
         self.stop_button.pack(side="left", padx=(0, 8))
-        self.clean_button = ttk.Button(self.actions, text="Limpiar resultados", style="Secondary.TButton", command=self.clean_generated_data)
+        self.clean_button = PillButton(self.actions, "Limpiar resultados", command=self.clean_generated_data, variant="secondary")
         self.clean_button.pack(side="left")
         self.actions.grid(row=0, column=1, sticky="e")
 
@@ -354,22 +376,45 @@ class FactuRiskApp:
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
 
+        self.hero = HeroBanner(
+            body,
+            "Detecta a tiempo los comprobantes con riesgo",
+            "Cruza el histórico de comprobantes con el padrón oficial de SUNAT y prioriza la revisión de los pendientes con Machine Learning.",
+            "Ejecutar proceso completo",
+            command=lambda: self.run_phase_group("todo"),
+            art=self.logo_art,
+        )
+        self.hero.grid(row=0, column=0, sticky="ew", pady=(4, 16))
+        self.todo_button = self.hero.button
         self.build_metric_strip(body)
         self.work_area = ttk.Frame(body, style="App.TFrame")
-        self.work_area.grid(row=1, column=0, sticky="ew")
+        self.work_area.grid(row=2, column=0, sticky="ew")
         self.build_phase_cards(self.work_area)
         self.build_detail_panel(self.work_area)
         self.layout_work_area(True)
         self.build_console(body)
 
+    @staticmethod
+    def describe_sunat_source() -> tuple[str, str]:
+        """Which SUNAT source the preparation phase will use, without connecting to MongoDB."""
+
+        from datos import SUNAT_BACKUP_CSV
+        from prepare_dataset import cargar_config_mongodb
+
+        if cargar_config_mongodb() is not None:
+            return "SUNAT desde MongoDB", PALETTE["success"]
+        if SUNAT_BACKUP_CSV.exists():
+            return "SUNAT: respaldo local", PALETTE["primary"]
+        return "SUNAT: snapshot incluido", PALETTE["accent"]
+
     def build_metric_strip(self, parent: ttk.Frame) -> None:
         grid = ResponsiveGrid(parent, min_item_width=190, max_columns=5)
-        grid.grid(row=0, column=0, sticky="ew", pady=(4, 6))
+        grid.grid(row=1, column=0, sticky="ew", pady=(0, 2))
         metrics = [
             ("Modelo", "modelo"),
             ("Recall incidencias", "recall"),
             ("F1 incidencias", "f1"),
-            ("Pendientes evaluados", "pendientes"),
+            ("Pendientes", "pendientes"),
             ("Riesgo alto", "riesgo_alto"),
         ]
         for title, key in metrics:
@@ -434,13 +479,14 @@ class FactuRiskApp:
         self.result_text = ttk.Label(inner, text="", style="CardBody.TLabel", justify="left")
         self.result_text.grid(row=6, column=0, sticky="ew", pady=(2, 14))
 
-        self.run_button = ttk.Button(inner, text="Ejecutar paso", style="Primary.TButton", command=self.run_selected)
-        self.run_button.grid(row=7, column=0, sticky="ew", pady=(0, 6))
-        self.open_step_button = ttk.Button(inner, text="Abrir resultado del paso", style="Secondary.TButton", command=self.open_step_result)
-        self.open_step_button.grid(row=8, column=0, sticky="ew", pady=(0, 6))
-        self.dashboard_button = ttk.Button(inner, text="Ver dashboard de riesgo", style="Secondary.TButton", command=self.show_dashboard)
+        surface = PALETTE["surface"]
+        self.run_button = PillButton(inner, "Ejecutar paso", command=self.run_selected, variant="primary", background=surface, height=40)
+        self.run_button.grid(row=7, column=0, sticky="ew", pady=(0, 8))
+        self.open_step_button = PillButton(inner, "Abrir resultado del paso", command=self.open_step_result, variant="secondary", background=surface, height=40)
+        self.open_step_button.grid(row=8, column=0, sticky="ew", pady=(0, 8))
+        self.dashboard_button = PillButton(inner, "Ver dashboard de riesgo", command=self.show_dashboard, variant="secondary", background=surface, height=40)
         self.dashboard_button.grid(row=9, column=0, sticky="ew")
-        inner.bind("<Configure>", self._wrap_detail)
+        inner.bind("<Configure>", self._wrap_detail, add="+")
 
     def _wrap_detail(self, event: tk.Event) -> None:
         width = max(event.width - 44, 160)
@@ -449,11 +495,11 @@ class FactuRiskApp:
 
     def build_console(self, parent: ttk.Frame) -> None:
         box = card(parent, padding=(14, 10))
-        box.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        box.grid(row=3, column=0, sticky="ew", pady=(14, 0))
         inner = box.inner  # type: ignore[attr-defined]
         inner.columnconfigure(0, weight=1)
         ttk.Label(inner, text="Consola en tiempo real", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Button(inner, text="Limpiar consola", style="Ghost.TButton", command=self.clear_console).grid(row=0, column=1, sticky="e")
+        PillButton(inner, "Limpiar consola", command=self.clear_console, variant="ghost", background=PALETTE["surface"], height=32, font=(FONT_MEDIUM, 9)).grid(row=0, column=1, sticky="e")
         self.console = ScrolledText(
             inner,
             height=12,
@@ -519,7 +565,7 @@ class FactuRiskApp:
         for key, item in self.nav_items.items():
             item.set_selected(key == phase)
         for key, box in self.phase_cards.items():
-            box.configure(background=PALETTE["primary"] if key == phase else PALETTE["line"])
+            box.set_border(PALETTE["primary"] if key == phase else PALETTE["line"])
 
         if phase == "todo":
             self.detail_caption.configure(text="PROCESO COMPLETO")
@@ -705,6 +751,8 @@ class FactuRiskApp:
                     self.log(f"FASE COMPLETADA: {phase}", "ok")
                     if phase in {"entrenar", "predecir"}:
                         self.refresh_metrics()
+                    if phase in {"scraping", "mongodb"}:
+                        self.source_pill.set(*self.describe_sunat_source())
                 elif event == "phase_failed":
                     self.set_phase_status(payload, "Fallida")
                     self.status_text.set(f"Fase fallida: {PHASES[payload].title}")

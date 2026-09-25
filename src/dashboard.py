@@ -11,6 +11,7 @@ from typing import Any, Callable
 import matplotlib
 
 matplotlib.use("TkAgg")
+import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, MaxNLocator, PercentFormatter
@@ -18,8 +19,8 @@ from PIL import Image, ImageTk
 
 import dashboard_data as dd
 from paths import get_application_root
-from theme import PALETTE, RISK_COLORS, apply_chart_style, model_display_name
-from ui_widgets import ResponsiveGrid, ScrollableFrame, card
+from theme import FONT, PALETTE, RISK_COLORS, apply_chart_style, model_display_name, sequential_cmap
+from ui_widgets import DonutRing, PillButton, ResponsiveGrid, RoundedCard, ScrollableFrame, SegmentedControl, SegmentedMeter, StatusPill, card
 
 OUTPUTS_DIR = get_application_root() / "outputs"
 
@@ -29,12 +30,12 @@ MODEL_CHARTS = [
     ("06_precision_recall_curve.png", "Curva Precision-Recall: equilibrio entre detectar incidencias y generar alertas."),
     ("07_roc_curve.png", "Curva ROC: capacidad del modelo para separar aceptadas e incidencias."),
     ("04_comparacion_modelos_pr_auc.png", "Comparación de modelos por PR-AUC, con y sin variables SUNAT."),
+    ("10_metricas_por_umbral.png", "Precision, recall y F1 según el umbral de decisión."),
     ("13_importancia_variables.png", "Importancia de variables por permutación."),
     ("15_aporte_sunat.png", "Aporte de las variables SUNAT frente al modelo sin ellas."),
-    ("16_distribucion_riesgo_pendientes.png", "Distribución de riesgo en los comprobantes pendientes."),
 ]
 
-CHART_HEIGHT_PX = 290
+CHART_HEIGHT_PX = 300
 
 
 def _fmt_int(value: float) -> str:
@@ -48,6 +49,15 @@ def _fmt_pct(value: Any) -> str:
         return "N/D"
 
 
+def _clean_axes(ax: Any, grid_axis: str = "y") -> None:
+    ax.grid(axis="both", visible=False)
+    if grid_axis:
+        ax.grid(axis=grid_axis, visible=True)
+    ax.tick_params(length=0)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(PALETTE["line"])
+
+
 class DashboardView(ttk.Frame):
     """KPIs, charts, top-risk table and the model chart gallery."""
 
@@ -58,17 +68,24 @@ class DashboardView(ttk.Frame):
         self.go_to_pipeline = go_to_pipeline
         self.canvases: list[FigureCanvasTkAgg] = []
         self.gallery_index = 0
+        self.gallery_items: list[tuple[Path, str]] = []
         self.gallery_image: ImageTk.PhotoImage | None = None
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(self, style="App.TFrame", padding=(28, 22, 28, 12))
+        header = ttk.Frame(self, style="App.TFrame", padding=(28, 22, 28, 14))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="Dashboard de riesgo", style="H1.TLabel").grid(row=0, column=0, sticky="w")
-        self.subtitle = ttk.Label(header, text="", style="Sub.TLabel")
-        self.subtitle.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        ttk.Button(header, text="Actualizar", style="Secondary.TButton", command=self.refresh).grid(row=0, column=1, rowspan=2, sticky="e")
+        titles = ttk.Frame(header, style="App.TFrame")
+        titles.grid(row=0, column=0, sticky="w")
+        title_row = ttk.Frame(titles, style="App.TFrame")
+        title_row.pack(anchor="w")
+        ttk.Label(title_row, text="Dashboard de riesgo", style="H1.TLabel").pack(side="left")
+        self.status = StatusPill(title_row, "Sin datos", PALETTE["subtle"])
+        self.status.pack(side="left", padx=(14, 0), pady=(6, 0))
+        self.subtitle = ttk.Label(titles, text="", style="Sub.TLabel")
+        self.subtitle.pack(anchor="w", pady=(4, 0))
+        PillButton(header, "↻  Actualizar", command=self.refresh, variant="secondary").grid(row=0, column=1, sticky="ne")
 
         self.scroll = ScrollableFrame(self)
         self.scroll.grid(row=1, column=0, sticky="nsew")
@@ -88,9 +105,12 @@ class DashboardView(ttk.Frame):
         data = dd.load_dashboard_data()
         if data is None:
             self.subtitle.configure(text="Aún no hay predicciones para analizar.")
+            self.status.set("Sin predicciones", PALETTE["subtle"])
             self._empty_state()
             return
 
+        model = model_display_name(data.metrics.get("mejor_modelo", "modelo"))
+        self.status.set(f"{model} · umbral {data.metrics.get('umbral', 0):.0%}", PALETTE["success"])
         self.subtitle.configure(
             text=f"{len(data.predictions):,} comprobantes pendientes evaluados · actualizado {datetime.now():%d/%m/%Y %H:%M}"
         )
@@ -113,173 +133,298 @@ class DashboardView(ttk.Frame):
             wraplength=560,
             justify="left",
         ).pack(anchor="w")
-        ttk.Button(inner, text="Ir a Machine Learning", style="Primary.TButton", command=self.go_to_pipeline).pack(anchor="w", pady=(16, 0))
+        PillButton(inner, "Ir a Machine Learning", command=self.go_to_pipeline, background=PALETTE["surface"]).pack(anchor="w", pady=(16, 0))
 
     # --------------------------------------------------------------------- KPIs
 
+    def _kpi_card(self, parent: tk.Misc, icon_key: str, title: str) -> ttk.Frame:
+        box = card(parent, padding=(18, 16))
+        inner = box.inner  # type: ignore[attr-defined]
+        head = ttk.Frame(inner, style="Card.TFrame")
+        head.pack(fill="x")
+        if icon_key in self.icons:
+            ttk.Label(head, image=self.icons[icon_key], style="CardBody.TLabel").pack(side="left", padx=(0, 10))
+        ttk.Label(head, text=title, style="CardTitle.TLabel").pack(side="left")
+        return box
+
     def _kpi_section(self, data: dd.DashboardData) -> None:
         values = dd.kpis(data)
-        grid = ResponsiveGrid(self.content, min_item_width=210, max_columns=4)
+        grid = ResponsiveGrid(self.content, min_item_width=250, max_columns=4)
         grid.grid(row=0, column=0, sticky="ew", pady=(4, 4))
-        threshold = values["umbral"]
-        cards = [
-            ("pendientes_tile", "Pendientes evaluados", _fmt_int(values["pendientes"]), f"Probabilidad media {values['probabilidad_media'] * 100:.1f}%"),
-            ("riesgo_alto_tile", "Riesgo alto", _fmt_int(values["riesgo_alto"]), f"{values['riesgo_alto_pct']:.1f}% de los pendientes"),
-            (
-                "recall_tile",
-                "Marcados para revisión",
-                _fmt_int(values["marcados_revision"]),
-                f"{values['marcados_revision_pct']:.1f}% superan el umbral {threshold:.2f}" if threshold is not None else "Según el umbral del modelo",
-            ),
-            ("modelo_tile", "Modelo en uso", model_display_name(values["modelo"]), f"Recall {_fmt_pct(values['recall'])} · PR-AUC {values['pr_auc']:.3f}" if values["pr_auc"] is not None else ""),
-        ]
-        for icon_key, title, value, caption in cards:
-            box = card(grid)
-            inner = box.inner  # type: ignore[attr-defined]
-            row = ttk.Frame(inner, style="Card.TFrame")
-            row.pack(fill="x")
-            if icon_key in self.icons:
-                ttk.Label(row, image=self.icons[icon_key], style="CardBody.TLabel").pack(side="left", padx=(0, 12))
-            text = ttk.Frame(row, style="Card.TFrame")
-            text.pack(side="left", fill="x", expand=True)
-            ttk.Label(text, text=title, style="CardCaption.TLabel").pack(anchor="w")
-            ttk.Label(text, text=value, style="CardValue.TLabel").pack(anchor="w")
-            ttk.Label(inner, text=caption, style="CardBody.TLabel").pack(anchor="w", pady=(6, 0))
-            grid.add(box)
+
+        box = self._kpi_card(grid, "pendientes_tile", "Pendientes evaluados")
+        inner = box.inner  # type: ignore[attr-defined]
+        ttk.Label(inner, text=_fmt_int(values["pendientes"]), style="CardValue.TLabel").pack(anchor="w", pady=(14, 0))
+        ttk.Label(inner, text=f"Probabilidad media de incidencia {values['probabilidad_media'] * 100:.1f}%", style="CardBody.TLabel").pack(anchor="w")
+        grid.add(box)
+
+        box = self._kpi_card(grid, "riesgo_alto_tile", "Riesgo alto")
+        inner = box.inner  # type: ignore[attr-defined]
+        row = ttk.Frame(inner, style="Card.TFrame")
+        row.pack(fill="x", pady=(8, 0))
+        DonutRing(row, values["riesgo_alto_pct"] / 100, "de pendientes", PALETTE["danger"], size=112).pack(side="left")
+        side = ttk.Frame(row, style="Card.TFrame")
+        side.pack(side="left", padx=(14, 0))
+        ttk.Label(side, text=_fmt_int(values["riesgo_alto"]), style="CardValue.TLabel").pack(anchor="w")
+        ttk.Label(side, text="a revisar\nprimero", style="CardBody.TLabel", justify="left").pack(anchor="w")
+        grid.add(box)
+
+        box = self._kpi_card(grid, "recall_tile", "Para revisión")
+        inner = box.inner  # type: ignore[attr-defined]
+        ttk.Label(inner, text=f"{values['marcados_revision_pct']:.1f} %", style="CardValue.TLabel").pack(anchor="w", pady=(14, 6))
+        SegmentedMeter(inner, values["marcados_revision_pct"] / 100, PALETTE["primary"]).pack(fill="x")
+        scale = ttk.Frame(inner, style="Card.TFrame")
+        scale.pack(fill="x", pady=(4, 0))
+        ttk.Label(scale, text="0%", style="CardCaption.TLabel").pack(side="left")
+        ttk.Label(scale, text="100%", style="CardCaption.TLabel").pack(side="right")
+        ttk.Label(inner, text=f"{_fmt_int(values['marcados_revision'])} superan el umbral del modelo", style="CardBody.TLabel").pack(anchor="w", pady=(4, 0))
+        grid.add(box)
+
+        box = self._kpi_card(grid, "modelo_tile", "Modelo en uso")
+        inner = box.inner  # type: ignore[attr-defined]
+        ttk.Label(inner, text=model_display_name(values["modelo"]), style="CardValue.TLabel").pack(anchor="w", pady=(14, 6))
+        pills = ttk.Frame(inner, style="Card.TFrame")
+        pills.pack(anchor="w")
+        StatusPill(pills, f"Recall {float(values['recall'] or 0):.0%}", PALETTE["primary"]).pack(side="left", padx=(0, 6))
+        if values["pr_auc"] is not None:
+            StatusPill(pills, f"PR-AUC {values['pr_auc']:.2f}", PALETTE["accent"]).pack(side="left")
+        caption = ttk.Label(inner, text="Validación temporal y probabilidades calibradas", style="CardBody.TLabel", justify="left")
+        caption.pack(anchor="w", fill="x", pady=(8, 0))
+        inner.bind("<Configure>", lambda event: caption.configure(wraplength=max(event.width - 40, 120)), add="+")
+        grid.add(box)
 
     # ------------------------------------------------------------------- charts
 
-    def _chart_card(self, parent: tk.Misc, title: str, caption: str) -> tuple[tk.Frame, Figure]:
-        box = card(parent, padding=(14, 12))
+    def _chart_card(self, parent: tk.Misc, title: str, caption: str, height: int = CHART_HEIGHT_PX) -> tuple[tk.Frame, Figure]:
+        box = card(parent, padding=(16, 14))
         inner = box.inner  # type: ignore[attr-defined]
         ttk.Label(inner, text=title, style="CardTitle.TLabel").pack(anchor="w")
-        ttk.Label(inner, text=caption, style="CardBody.TLabel").pack(anchor="w", pady=(2, 6))
-        figure = Figure(figsize=(5, 2.9), dpi=96, layout="constrained")
+        ttk.Label(inner, text=caption, style="CardBody.TLabel").pack(anchor="w", pady=(2, 8))
+        figure = Figure(figsize=(5, height / 96), dpi=96, layout="constrained")
         canvas = FigureCanvasTkAgg(figure, master=inner)
         widget = canvas.get_tk_widget()
-        widget.configure(height=CHART_HEIGHT_PX, highlightthickness=0, background=PALETTE["surface"])
+        widget.configure(height=height, highlightthickness=0, background=PALETTE["surface"])
         widget.pack(fill="x", expand=False)
         self.canvases.append(canvas)
         return box, figure
 
     def _chart_section(self, data: dd.DashboardData) -> None:
         pred = data.predictions
-        ttk.Label(self.content, text="ANÁLISIS DE PENDIENTES", style="Section.TLabel").grid(row=1, column=0, sticky="w", pady=(14, 8))
-        grid = ResponsiveGrid(self.content, min_item_width=430, max_columns=2)
+        threshold = data.metrics.get("umbral")
+        ttk.Label(self.content, text="ANÁLISIS DE PENDIENTES", style="Section.TLabel").grid(row=1, column=0, sticky="w", pady=(16, 10))
+        grid = ResponsiveGrid(self.content, min_item_width=440, max_columns=2)
         grid.grid(row=2, column=0, sticky="ew")
 
+        self._risk_levels_chart(grid, pred)
+        self._quadrant_chart(grid, pred, threshold)
+        self._heatmap_chart(grid, pred)
+        self._monthly_chart(grid, pred)
+        self._factors_chart(grid, pred)
+        self._suppliers_chart(grid, pred)
+
+    def _risk_levels_chart(self, grid: ResponsiveGrid, pred: Any) -> None:
         counts = dd.risk_level_counts(pred)
-        box, fig = self._chart_card(grid, "Comprobantes por nivel de riesgo", "Cortes calculados sobre la distribución de pendientes.")
+        box, fig = self._chart_card(grid, "Comprobantes por nivel de riesgo", "Cortes calculados sobre la distribución de los pendientes.")
         ax = fig.add_subplot()
-        bars = ax.bar(counts.index, counts.values, color=[RISK_COLORS[level] for level in counts.index], width=0.6)
-        ax.bar_label(bars, labels=[f"{value:,}" for value in counts.values], fontsize=8, color=PALETTE["muted"])
+        bars = ax.bar(counts.index, counts.values, color=[RISK_COLORS[level] for level in counts.index], width=0.55)
+        ax.bar_label(bars, labels=[f"{value:,}" for value in counts.values], fontsize=9, color=PALETTE["text"], padding=4)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value:,.0f}"))
+        ax.margins(y=0.12)
+        _clean_axes(ax)
         grid.add(box)
 
-        box, fig = self._chart_card(grid, "Distribución de probabilidades", "Probabilidad de incidencia estimada; la línea marca el umbral operativo.")
+    def _quadrant_chart(self, grid: ResponsiveGrid, pred: Any, threshold: float | None) -> None:
+        points = dd.amount_vs_probability(pred)
+        if points.empty:
+            return
+        box, fig = self._chart_card(
+            grid,
+            "Importe vs. probabilidad de incidencia",
+            "Cada punto es un pendiente (muestra). Arriba a la derecha: alto importe y alto riesgo.",
+        )
         ax = fig.add_subplot()
-        probabilities = pred["Probabilidad_Incidencia"]
-        threshold = data.metrics.get("umbral")
-        upper = min(1.0, max(float(probabilities.quantile(0.999)) * 1.15, (threshold or 0) * 1.5, 0.05))
-        ax.hist(probabilities, bins=40, range=(0, upper), color=PALETTE["primary"], alpha=0.85)
-        ax.set_xlim(0, upper)
-        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value:,.0f}"))
+        for level in dd.RISK_LEVELS:
+            subset = points[points["Nivel_Riesgo"] == level]
+            ax.scatter(subset["Importe_Total"], subset["Probabilidad_Incidencia"], s=9, alpha=0.55, color=RISK_COLORS[level], label=level, linewidths=0)
+        ax.set_xscale("log")
+        median_amount = float(pred.loc[pred["Importe_Total"] > 0, "Importe_Total"].median())
+        ax.axvline(median_amount, color=PALETTE["subtle"], linestyle=(0, (4, 3)), linewidth=1)
         if threshold is not None:
-            ax.axvline(threshold, color=PALETTE["accent_dark"], linewidth=1.6, linestyle="--")
-            ax.annotate(
-                f"umbral {threshold:.0%}",
-                xy=(threshold, 1),
-                xycoords=("data", "axes fraction"),
-                xytext=(6, -12),
-                textcoords="offset points",
-                color=PALETTE["accent_dark"],
-                fontsize=8,
+            ax.axhline(threshold, color=PALETTE["subtle"], linestyle=(0, (4, 3)), linewidth=1)
+            critical = pred[(pred["Importe_Total"] > median_amount) & (pred["Probabilidad_Incidencia"] >= threshold)]
+            ax.text(
+                0.98,
+                0.96,
+                f"{len(critical):,} críticos",
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=9,
+                color=PALETTE["danger"],
+                bbox={"boxstyle": "round,pad=0.35", "facecolor": PALETTE["danger_soft"], "edgecolor": "none"},
             )
-        ax.set_xlabel("Probabilidad de incidencia")
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+        ax.set_xlabel("Importe (escala logarítmica)")
+        ax.legend(
+            loc="upper left",
+            fontsize=8,
+            markerscale=2.5,
+            ncols=3,
+            scatterpoints=1,
+            handletextpad=0.2,
+            columnspacing=1.2,
+            frameon=True,
+            facecolor=PALETTE["surface"],
+            edgecolor="none",
+            framealpha=1,
+        )
+        _clean_axes(ax, grid_axis="")
         grid.add(box)
 
-        by_type = dd.high_risk_share_by_type(pred)
-        box, fig = self._chart_card(grid, "Riesgo alto por tipo de comprobante", "Porcentaje de comprobantes de cada tipo clasificados en riesgo alto.")
+    def _heatmap_chart(self, grid: ResponsiveGrid, pred: Any) -> None:
+        table = dd.risk_heatmap(pred)
+        if table is None or table.empty:
+            return
+        box, fig = self._chart_card(grid, "Mapa de calor: tipo × mes de emisión", "Probabilidad media de incidencia en los últimos 12 meses.")
         ax = fig.add_subplot()
-        ordered = by_type.sort_values("porcentaje_alto")
-        ax.barh(ordered.index.astype(str), ordered["porcentaje_alto"], color=PALETTE["accent"])
-        ax.xaxis.set_major_formatter(PercentFormatter(decimals=0))
-        ax.grid(axis="x")
-        ax.grid(axis="y", visible=False)
+        image = ax.imshow(table.to_numpy(dtype=float), aspect="auto", cmap=sequential_cmap(), interpolation="nearest")
+        ax.set_xticks(range(len(table.columns)), labels=table.columns, rotation=45, ha="right")
+        ax.set_yticks(range(len(table.index)), labels=[str(label) for label in table.index])
+        ax.set_xticks(np.arange(-0.5, len(table.columns)), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(table.index)), minor=True)
+        ax.grid(which="minor", color=PALETTE["surface"], linewidth=2.5, linestyle="-")
+        ax.grid(which="major", visible=False)
+        ax.tick_params(which="both", length=0)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        colorbar = fig.colorbar(image, ax=ax, fraction=0.04, pad=0.02, format=PercentFormatter(xmax=1, decimals=0))
+        colorbar.outline.set_visible(False)
+        colorbar.ax.tick_params(colors=PALETTE["muted"], length=0, labelsize=8)
         grid.add(box)
 
+    def _monthly_chart(self, grid: ResponsiveGrid, pred: Any) -> None:
         monthly = dd.risk_by_month(pred)
-        if monthly is not None and len(monthly) > 1:
-            box, fig = self._chart_card(grid, "Riesgo por mes de emisión", "Probabilidad media de incidencia de los pendientes emitidos cada mes.")
-            ax = fig.add_subplot()
-            ax.plot(monthly.index, monthly["probabilidad_media"], color=PALETTE["primary"], linewidth=2)
-            ax.fill_between(monthly.index, monthly["probabilidad_media"], color=PALETTE["primary"], alpha=0.12)
-            ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
-            fig.autofmt_xdate()
-            grid.add(box)
+        if monthly is None or len(monthly) < 2:
+            return
+        box, fig = self._chart_card(grid, "Riesgo por mes de emisión", "Probabilidad media de incidencia; se marca el mes más riesgoso.")
+        ax = fig.add_subplot()
+        series = monthly["probabilidad_media"]
+        smooth = series.rolling(3, center=True, min_periods=1).mean()
+        ax.plot(series.index, series.values, color=PALETTE["subtle"], linewidth=1, alpha=0.8)
+        ax.plot(smooth.index, smooth.values, color=PALETTE["primary"], linewidth=2.4)
+        ax.fill_between(smooth.index, smooth.values, series.min() * 0.95, color=PALETTE["primary"], alpha=0.12)
+        peak = series.idxmax()
+        ax.scatter([peak], [series[peak]], s=60, color=PALETTE["background"], edgecolors=PALETTE["text"], linewidths=2, zorder=5)
+        ax.annotate(
+            f"{series[peak]:.1%}\n{dd.MONTHS_ES[peak.month - 1]} {peak.year}",
+            xy=(peak, series[peak]),
+            xytext=(0, 16),
+            textcoords="offset points",
+            ha="center",
+            fontsize=8,
+            color=PALETTE["text"],
+            bbox={"boxstyle": "round,pad=0.4", "facecolor": PALETTE["surface_alt"], "edgecolor": PALETTE["line"]},
+        )
+        ax.set_ylim(series.min() * 0.95, series.max() * 1.12)
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=1))
+        _clean_axes(ax)
+        fig.autofmt_xdate()
+        grid.add(box)
 
-        suppliers = dd.top_suppliers(pred)
-        if not suppliers.empty:
-            box, fig = self._chart_card(grid, "Proveedores con más riesgo alto", "RUC con mayor número de comprobantes pendientes en riesgo alto.")
-            ax = fig.add_subplot()
-            ordered = suppliers.iloc[::-1]
-            ax.barh(ordered.index.astype(str), ordered["riesgo_alto"], color=PALETTE["danger"], alpha=0.85)
-            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax.grid(axis="x")
-            ax.grid(axis="y", visible=False)
-            grid.add(box)
-
+    def _factors_chart(self, grid: ResponsiveGrid, pred: Any) -> None:
         factors = dd.top_risk_factors(pred)
-        if not factors.empty:
-            box, fig = self._chart_card(grid, "Factores de riesgo más frecuentes", "Explicaciones asociadas a los comprobantes en riesgo alto.")
-            ax = fig.add_subplot()
-            ordered = factors.iloc[::-1]
-            ax.barh(ordered.index, ordered.values, color=PALETTE["primary"])
-            ax.grid(axis="x")
-            ax.grid(axis="y", visible=False)
-            grid.add(box)
+        if factors.empty:
+            return
+        box, fig = self._chart_card(grid, "Factores de riesgo más frecuentes", "Explicaciones asociadas a los comprobantes en riesgo alto.")
+        ax = fig.add_subplot()
+        ordered = factors.iloc[::-1]
+        positions = range(len(ordered))
+        ax.hlines(positions, 0, ordered.values, color=PALETTE["line"], linewidth=2)
+        ax.scatter(ordered.values, positions, s=90, color=PALETTE["danger"], zorder=3)
+        for position, value in zip(positions, ordered.values):
+            ax.annotate(f"{value:,}", (value, position), xytext=(9, 0), textcoords="offset points", va="center", fontsize=8, color=PALETTE["muted"])
+        ax.set_yticks(list(positions), labels=ordered.index)
+        ax.set_xlim(0, ordered.max() * 1.22)
+        _clean_axes(ax, grid_axis="x")
+        grid.add(box)
+
+    def _suppliers_chart(self, grid: ResponsiveGrid, pred: Any) -> None:
+        suppliers = dd.top_suppliers(pred)
+        if suppliers.empty:
+            return
+        box, fig = self._chart_card(grid, "Proveedores con más riesgo alto", "RUC con más comprobantes pendientes en riesgo alto.")
+        ax = fig.add_subplot()
+        ordered = suppliers.iloc[::-1]
+        ax.barh(ordered.index.astype(str), ordered["riesgo_alto"], color=PALETTE["accent"], height=0.55)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        _clean_axes(ax, grid_axis="x")
+        grid.add(box)
 
     # -------------------------------------------------------------------- table
 
     def _table_section(self, data: dd.DashboardData) -> None:
-        ttk.Label(self.content, text="COMPROBANTES PRIORITARIOS", style="Section.TLabel").grid(row=3, column=0, sticky="w", pady=(14, 8))
-        box = card(self.content, padding=(12, 12))
-        box.grid(row=4, column=0, sticky="ew")
+        box = card(self.content, padding=(20, 18))
+        box.grid(row=4, column=0, sticky="ew", pady=(18, 0))
         inner = box.inner  # type: ignore[attr-defined]
         inner.columnconfigure(0, weight=1)
-        table = dd.top_invoices(data.predictions)
+
+        head = ttk.Frame(inner, style="Card.TFrame")
+        head.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        head.columnconfigure(1, weight=1)
+        if "riesgo_alto_tile" in self.icons:
+            ttk.Label(head, image=self.icons["riesgo_alto_tile"], style="CardBody.TLabel").grid(row=0, column=0, rowspan=2, padx=(0, 12))
+        ttk.Label(head, text="Comprobantes prioritarios", style="CardTitle.TLabel").grid(row=0, column=1, sticky="sw")
+        ttk.Label(head, text="Los 15 pendientes con mayor probabilidad de incidencia", style="CardBody.TLabel").grid(row=1, column=1, sticky="nw")
+        SegmentedControl(head, ["Todos", "Alto", "Medio", "Bajo"], command=lambda level: self._fill_table(data, level), background=PALETTE["surface"]).grid(
+            row=0, column=2, rowspan=2, sticky="e"
+        )
+
         headings = {
             "ID_Comprobante": ("Comprobante", 120),
             "RUC_Proveedor": ("RUC proveedor", 110),
             "Tipo_Comprobante": ("Tipo", 130),
             "Importe_Total": ("Importe", 90),
             "Probabilidad_Incidencia": ("Probabilidad", 90),
-            "Nivel_Riesgo": ("Riesgo", 70),
+            "Nivel_Riesgo": ("Riesgo", 80),
             "Razones_Principales": ("Factores", 320),
         }
-        columns = list(table.columns)
-        tree = ttk.Treeview(inner, columns=columns, show="headings", height=min(len(table), 15))
+        columns = list(dd.top_invoices(data.predictions, limit=1).columns)
+        frame = RoundedCard(inner, padding=(10, 10), radius=16, fill=PALETTE["surface_alt"], background=PALETTE["surface"], inner_style="Table.TFrame")
+        frame.grid(row=1, column=0, sticky="ew")
+        table_area = frame.inner
+        table_area.columnconfigure(0, weight=1)
+        self.tree = ttk.Treeview(table_area, columns=columns, show="headings", height=15, style="Table.Treeview")
         for column in columns:
             label, width = headings.get(column, (column, 100))
-            tree.heading(column, text=label, anchor="w")
-            tree.column(column, width=width, minwidth=60, stretch=column == "Razones_Principales", anchor="w")
-        for _, row in table.iterrows():
+            self.tree.heading(column, text=label, anchor="w")
+            self.tree.column(column, width=width, minwidth=60, stretch=column == "Razones_Principales", anchor="w")
+        self.tree.tag_configure("odd", background=PALETTE["surface"])
+        self.tree.tag_configure("even", background=PALETTE["surface_alt"])
+        xscroll = ttk.Scrollbar(table_area, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(xscrollcommand=xscroll.set)
+        self.tree.grid(row=0, column=0, sticky="ew")
+        xscroll.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self._fill_table(data, "Todos")
+
+    def _fill_table(self, data: dd.DashboardData, level: str) -> None:
+        predictions = data.predictions
+        if level != "Todos":
+            predictions = predictions[predictions["Nivel_Riesgo"] == level]
+        table = dd.top_invoices(predictions)
+        self.tree.delete(*self.tree.get_children())
+        for index, (_, row) in enumerate(table.iterrows()):
             values = []
-            for column in columns:
+            for column in table.columns:
                 value = row[column]
                 if column == "Probabilidad_Incidencia":
                     value = f"{value * 100:.1f}%"
                 elif column == "Importe_Total":
                     value = f"{value:,.2f}"
                 elif column == "Nivel_Riesgo":
-                    value = f"● {value}"
+                    value = f"●  {value}"
                 values.append(value)
-            tree.insert("", "end", values=values)
-        xscroll = ttk.Scrollbar(inner, orient="horizontal", command=tree.xview)
-        tree.configure(xscrollcommand=xscroll.set)
-        tree.grid(row=0, column=0, sticky="ew")
-        xscroll.grid(row=1, column=0, sticky="ew")
+            self.tree.insert("", "end", values=values, tags=("odd" if index % 2 else "even",))
+        self.tree.configure(height=max(min(len(table), 15), 1))
 
     # ------------------------------------------------------------------ gallery
 
@@ -287,20 +432,20 @@ class DashboardView(ttk.Frame):
         self.gallery_items = [(OUTPUTS_DIR / name, text) for name, text in MODEL_CHARTS if (OUTPUTS_DIR / name).exists()]
         if not self.gallery_items:
             return
-        ttk.Label(self.content, text="GRÁFICOS DEL MODELO", style="Section.TLabel").grid(row=5, column=0, sticky="w", pady=(18, 8))
+        ttk.Label(self.content, text="GRÁFICOS DEL MODELO", style="Section.TLabel").grid(row=5, column=0, sticky="w", pady=(18, 10))
         box = card(self.content, padding=(16, 14))
         box.grid(row=6, column=0, sticky="ew")
         inner = box.inner  # type: ignore[attr-defined]
         inner.columnconfigure(1, weight=1)
-        ttk.Button(inner, text="‹", width=3, style="Secondary.TButton", command=lambda: self._move_gallery(-1)).grid(row=0, column=0, sticky="w")
-        self.gallery_title = ttk.Label(inner, text="", style="CardBody.TLabel", wraplength=600, justify="center", anchor="center")
+        PillButton(inner, "‹", command=lambda: self._move_gallery(-1), variant="secondary", background=PALETTE["surface"], padx=18).grid(row=0, column=0, sticky="w")
+        self.gallery_title = ttk.Label(inner, text="", style="CardBody.TLabel", justify="center", anchor="center")
         self.gallery_title.grid(row=0, column=1, sticky="ew", padx=12)
-        ttk.Button(inner, text="›", width=3, style="Secondary.TButton", command=lambda: self._move_gallery(1)).grid(row=0, column=2, sticky="e")
+        PillButton(inner, "›", command=lambda: self._move_gallery(1), variant="secondary", background=PALETTE["surface"], padx=18).grid(row=0, column=2, sticky="e")
         self.gallery_label = tk.Label(inner, background=PALETTE["surface"], borderwidth=0)
         self.gallery_label.grid(row=1, column=0, columnspan=3, pady=(12, 0))
-        self.gallery_counter = ttk.Label(inner, text="", style="CardCaption.TLabel")
+        self.gallery_counter = tk.Label(inner, text="", background=PALETTE["surface"], foreground=PALETTE["muted"], font=(FONT, 8))
         self.gallery_counter.grid(row=2, column=0, columnspan=3, pady=(6, 0))
-        inner.bind("<Configure>", lambda event: self._show_gallery(event.width))
+        inner.bind("<Configure>", lambda event: self._show_gallery(event.width), add="+")
         self._show_gallery(inner.winfo_width())
 
     def _move_gallery(self, step: int) -> None:
@@ -319,4 +464,3 @@ class DashboardView(ttk.Frame):
         self.gallery_label.configure(image=self.gallery_image)
         self.gallery_title.configure(text=text, wraplength=max(width - 140, 200))
         self.gallery_counter.configure(text=f"{self.gallery_index + 1} de {len(self.gallery_items)} · {Path(path).name}")
-

@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from theme import PALETTE  # noqa: E402
+from theme import PALETTE, TILE_COLORS, TILES_WITH_DARK_GLYPH  # noqa: E402
 
 ASSETS_DIR = PROJECT_ROOT / "assets"
 SCALE = 4
@@ -49,17 +49,30 @@ def draw_logo(size: int = 512) -> Image.Image:
 
     image, draw = canvas(size)
     s = size * SCALE
-    draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.22), fill=hex_rgba(PALETTE["ink"]))
+    # Diagonal gradient tile: primary blue to violet accent.
+    start, end = hex_rgba("#6D4AFF"), hex_rgba(PALETTE["primary"])
+    gradient = Image.new("RGBA", (s, s))
+    pixels = gradient.load()
+    for y in range(0, s):
+        for x in range(0, s, 4):
+            t = (x + y) / (2 * s)
+            color = tuple(int(start[i] + (end[i] - start[i]) * t) for i in range(4))
+            for dx in range(4):
+                if x + dx < s:
+                    pixels[x + dx, y] = color
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.24), fill=255)
+    image.paste(gradient, (0, 0), mask)
 
     # Invoice sheet with folded corner.
     left, top, right, bottom = s * 0.22, s * 0.16, s * 0.68, s * 0.80
     fold = s * 0.13
     sheet = [(left, top), (right - fold, top), (right, top + fold), (right, bottom), (left, bottom)]
     draw.polygon(sheet, fill=hex_rgba("#FFFFFF"))
-    draw.polygon([(right - fold, top), (right - fold, top + fold), (right, top + fold)], fill=hex_rgba("#C9D6D2"))
+    draw.polygon([(right - fold, top), (right - fold, top + fold), (right, top + fold)], fill=hex_rgba("#C7D2FE"))
 
     # Text lines of the invoice.
-    line_color = hex_rgba(PALETTE["primary"])
+    line_color = hex_rgba(PALETTE["accent"])
     widths = [0.30, 0.24, 0.30, 0.16]
     for index, width in enumerate(widths):
         y = top + s * (0.14 + index * 0.095)
@@ -67,7 +80,7 @@ def draw_logo(size: int = 512) -> Image.Image:
 
     # Radar pulse in the corner: concentric arcs around an alert dot.
     cx, cy = s * 0.72, s * 0.72
-    accent = hex_rgba(PALETTE["accent"])
+    accent = hex_rgba(PALETTE["danger"])
     draw.ellipse((cx - s * 0.20, cy - s * 0.20, cx + s * 0.20, cy + s * 0.20), fill=hex_rgba(PALETTE["ink"]))
     for radius, width in [(0.155, 0.028), (0.100, 0.028)]:
         r = s * radius
@@ -221,14 +234,19 @@ ICONS: dict[str, Glyph] = {
 
 
 def draw_icon(glyph: Glyph, color: str, size: int = ICON_SIZE, tile: str | None = None) -> Image.Image:
-    """Draw a line icon, optionally centered on a rounded tinted tile."""
+    """Draw a line icon, optionally centered on a rounded solid tile with a soft top highlight."""
 
     image, draw = canvas(size)
     s = size * SCALE
     if tile:
-        draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.28), fill=hex_rgba(tile))
+        draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.30), fill=hex_rgba(tile))
+        highlight = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        ImageDraw.Draw(highlight).rounded_rectangle((0, 0, s - 1, s * 0.55), radius=int(s * 0.30), fill=(255, 255, 255, 28))
+        mask = Image.new("L", (s, s), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.30), fill=255)
+        image.paste(Image.alpha_composite(image, highlight), (0, 0), mask)
         inner, inner_draw = canvas(size)
-        glyph(inner_draw, s, color, s * 0.075)
+        glyph(inner_draw, s, color, s * 0.10)
         inner = inner.resize((int(s * 0.58), int(s * 0.58)), Image.Resampling.LANCZOS)
         offset = int(s * 0.21)
         image.alpha_composite(inner, (offset, offset))
@@ -246,9 +264,8 @@ def main() -> None:
 
     for name, glyph in ICONS.items():
         draw_icon(glyph, PALETTE["nav_icon"]).save(ASSETS_DIR / f"nav_{name}.png")
-        draw_icon(glyph, PALETTE["primary"], tile=PALETTE["primary_soft"]).save(ASSETS_DIR / f"tile_{name}.png")
-    draw_icon(g_alert, PALETTE["danger"], tile=PALETTE["danger_soft"]).save(ASSETS_DIR / "tile_riesgo_alto.png")
-    draw_icon(g_coins, PALETTE["accent_dark"], tile=PALETTE["accent_soft"]).save(ASSETS_DIR / "tile_importe.png")
+        glyph_color = "#1A1405" if name in TILES_WITH_DARK_GLYPH else "#FFFFFF"
+        draw_icon(glyph, glyph_color, tile=TILE_COLORS[name]).save(ASSETS_DIR / f"tile_{name}.png")
     print(f"Assets generados en {ASSETS_DIR}")
 
 

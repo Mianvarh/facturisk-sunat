@@ -17,6 +17,7 @@ METRICS_PATH = PROJECT_ROOT / "outputs" / "metricas_modelo.json"
 
 RISK_LEVELS = ["Bajo", "Medio", "Alto"]
 NO_FACTORS = "Sin factores de riesgo destacados"
+MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"]
 
 
 @dataclass
@@ -137,3 +138,29 @@ def top_invoices(pred: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
         if column in pred.columns
     ]
     return pred.nlargest(limit, "Probabilidad_Incidencia")[columns]
+
+
+def risk_heatmap(pred: pd.DataFrame, max_months: int = 12) -> pd.DataFrame | None:
+    """Mean incidence probability per voucher type (rows) and emission month (columns)."""
+
+    if "Fecha_Emision" not in pred.columns or pred["Fecha_Emision"].isna().all():
+        return None
+    frame = pred.dropna(subset=["Fecha_Emision"]).copy()
+    frame["mes"] = frame["Fecha_Emision"].dt.to_period("M")
+    months = sorted(frame["mes"].unique())[-max_months:]
+    frame = frame[frame["mes"].isin(months)]
+    table = frame.pivot_table(index="Tipo_Comprobante", columns="mes", values="Probabilidad_Incidencia", aggfunc="mean")
+    table = table.loc[table.mean(axis=1).sort_values(ascending=False).index]
+    table.columns = [f"{MONTHS_ES[period.month - 1]} {period.year % 100:02d}" for period in table.columns]
+    return table
+
+
+def amount_vs_probability(pred: pd.DataFrame, sample: int = 4000, seed: int = 42) -> pd.DataFrame:
+    """Sample of invoices for the amount-vs-probability quadrant chart."""
+
+    columns = ["Importe_Total", "Probabilidad_Incidencia", "Nivel_Riesgo"]
+    frame = pred[columns].dropna()
+    frame = frame[frame["Importe_Total"] > 0]
+    if len(frame) > sample:
+        frame = frame.sample(sample, random_state=seed)
+    return frame
