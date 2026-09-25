@@ -44,51 +44,150 @@ def finish(image: Image.Image, size: int) -> Image.Image:
 # --------------------------------------------------------------------------- logo
 
 
-def draw_logo(size: int = 512) -> Image.Image:
-    """Invoice sheet with a radar pulse: the product detects risky invoices."""
+# Line-art logo variants: "arcos" (default), "factura" and "fr".
+LOGO_VARIANT = "arcos"
+TILE_DARK = "#15121F"
+TILE_BORDER = "#2C2740"
+STROKE_MAIN = "#B8ADFF"
+STROKE_SOFT = "#6F5FD6"
 
-    image, draw = canvas(size)
-    s = size * SCALE
-    # Diagonal gradient tile: primary blue to violet accent.
-    start, end = hex_rgba("#6D4AFF"), hex_rgba(PALETTE["primary"])
-    gradient = Image.new("RGBA", (s, s))
-    pixels = gradient.load()
-    for y in range(0, s):
-        for x in range(0, s, 4):
-            t = (x + y) / (2 * s)
-            color = tuple(int(start[i] + (end[i] - start[i]) * t) for i in range(4))
-            for dx in range(4):
-                if x + dx < s:
-                    pixels[x + dx, y] = color
+
+def _stroke_width(size: int, s: int, fine: float = 0.052) -> float:
+    """Fine strokes for large logos, thicker ones so small icons stay legible."""
+
+    if size <= 24:
+        return s * 0.105
+    if size <= 48:
+        return s * 0.078
+    return s * fine
+
+
+def _quad(p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], steps: int = 40) -> list[tuple[float, float]]:
+    return [
+        ((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0], (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1])
+        for t in (i / steps for i in range(steps + 1))
+    ]
+
+
+def _arc(center: tuple[float, float], radius: float, start_deg: float, end_deg: float, steps: int = 40) -> list[tuple[float, float]]:
+    return [
+        (center[0] + radius * math.cos(math.radians(a)), center[1] + radius * math.sin(math.radians(a)))
+        for a in (start_deg + (end_deg - start_deg) * i / steps for i in range(steps + 1))
+    ]
+
+
+def _path(draw: ImageDraw.ImageDraw, s: int, points: list[tuple[float, float]], width: float, color: str) -> None:
+    """Smooth round-capped stroke: stamps dense circles along the polyline (no joint artifacts)."""
+
+    scaled = [(x * s, y * s) for x, y in points]
+    r = width / 2
+    step = max(width * 0.12, 1.0)
+    fill = hex_rgba(color)
+    for (x0, y0), (x1, y1) in zip(scaled, scaled[1:]):
+        length = math.hypot(x1 - x0, y1 - y0)
+        count = max(int(length / step), 1)
+        for index in range(count + 1):
+            t = index / count
+            x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+
+
+def _line_tile(s: int) -> tuple[Image.Image, ImageDraw.ImageDraw]:
+    """Sober near-black tile with a hairline border and a very faint violet glow."""
+
+    image = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    base = Image.new("RGBA", (s, s), hex_rgba(TILE_DARK))
+    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    glow_draw = ImageDraw.Draw(glow)
+    for step in range(30, 0, -1):
+        r = s * 0.95 * step / 30
+        glow_draw.ellipse((s - r, s - r, s + r, s + r), fill=(124, 92, 255, min(2 + (30 - step), 34)))
+    base = Image.alpha_composite(base, glow)
     mask = Image.new("L", (s, s), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.24), fill=255)
-    image.paste(gradient, (0, 0), mask)
+    image.paste(base, (0, 0), mask)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.24), outline=hex_rgba(TILE_BORDER), width=max(int(s * 0.012), 2))
+    return image, draw
 
-    # Invoice sheet with folded corner.
-    left, top, right, bottom = s * 0.22, s * 0.16, s * 0.68, s * 0.80
-    fold = s * 0.13
-    sheet = [(left, top), (right - fold, top), (right, top + fold), (right, bottom), (left, bottom)]
-    draw.polygon(sheet, fill=hex_rgba("#FFFFFF"))
-    draw.polygon([(right - fold, top), (right - fold, top + fold), (right, top + fold)], fill=hex_rgba("#C7D2FE"))
 
-    # Text lines of the invoice.
-    line_color = hex_rgba(PALETTE["accent"])
-    widths = [0.30, 0.24, 0.30, 0.16]
-    for index, width in enumerate(widths):
-        y = top + s * (0.14 + index * 0.095)
-        draw.rounded_rectangle((left + s * 0.06, y, left + s * (0.06 + width), y + s * 0.035), radius=int(s * 0.02), fill=line_color)
+def _dot(draw: ImageDraw.ImageDraw, s: int, x: float, y: float, radius: float) -> None:
+    r = s * radius
+    draw.ellipse((x * s - r, y * s - r, x * s + r, y * s + r), fill=hex_rgba(PALETTE["danger"]))
 
-    # Radar pulse in the corner: concentric arcs around an alert dot.
-    cx, cy = s * 0.72, s * 0.72
-    accent = hex_rgba(PALETTE["danger"])
-    draw.ellipse((cx - s * 0.20, cy - s * 0.20, cx + s * 0.20, cy + s * 0.20), fill=hex_rgba(PALETTE["ink"]))
-    for radius, width in [(0.155, 0.028), (0.100, 0.028)]:
-        r = s * radius
-        draw.arc((cx - r, cy - r, cx + r, cy + r), start=200, end=340, fill=accent, width=int(s * width))
-        draw.arc((cx - r, cy - r, cx + r, cy + r), start=20, end=160, fill=accent, width=int(s * width))
-    dot = s * 0.045
-    draw.ellipse((cx - dot, cy - dot, cx + dot, cy + dot), fill=accent)
+
+def logo_arcos(size: int) -> Image.Image:
+    """F drawn with two parallel curved strokes (nested quarter arcs)."""
+
+    s = size * SCALE
+    image, draw = _line_tile(s)
+    w = _stroke_width(size, s)
+    outer = [(0.30, 0.78)] + _arc((0.52, 0.46), 0.22, 180, 270) + [(0.74, 0.24)]
+    inner = [(0.44, 0.78)] + _arc((0.58, 0.58), 0.14, 180, 270) + [(0.70, 0.44)]
+    _path(draw, s, outer, w, STROKE_MAIN)
+    _path(draw, s, inner, w, STROKE_SOFT)
+    _dot(draw, s, 0.64, 0.70, 0.052 if size > 48 else 0.075)
     return finish(image, size)
+
+
+def logo_factura(size: int) -> Image.Image:
+    """Outlined invoice with a curved folded corner and a rising trend ending in the risk dot."""
+
+    s = size * SCALE
+    image, draw = _line_tile(s)
+    w = _stroke_width(size, s)
+    left, top, right, bottom, fold, r = 0.27, 0.19, 0.73, 0.81, 0.14, 0.06
+    outline = (
+        [(right - fold, top), (left + r, top)]
+        + _arc((left + r, top + r), r, 270, 180)
+        + [(left, bottom - r)]
+        + _arc((left + r, bottom - r), r, 180, 90)
+        + [(right - r, bottom)]
+        + _arc((right - r, bottom - r), r, 90, 0)
+        + [(right, top + fold)]
+        + _quad((right, top + fold), (right - fold * 0.2, top + fold * 0.2), (right - fold, top))
+    )
+    _path(draw, s, outline, w, STROKE_MAIN)
+    if size > 32:
+        _path(draw, s, [(0.36, 0.33), (0.54, 0.33)], w * 0.8, STROKE_SOFT)
+        _path(draw, s, [(0.36, 0.42), (0.48, 0.42)], w * 0.8, STROKE_SOFT)
+    trend = _quad((0.36, 0.70), (0.47, 0.70), (0.57, 0.55))
+    _path(draw, s, trend, w, STROKE_SOFT)
+    _dot(draw, s, 0.59, 0.53, 0.05 if size > 48 else 0.075)
+    return finish(image, size)
+
+
+def logo_fr(size: int) -> Image.Image:
+    """F and R in flowing strokes: the F middle bar becomes the R bowl, the leg is a swoosh."""
+
+    s = size * SCALE
+    image, draw = _line_tile(s)
+    w = _stroke_width(size, s)
+    f_stroke = [(0.28, 0.79)] + _arc((0.42, 0.37), 0.14, 180, 270) + [(0.72, 0.23)]
+    r_stroke = (
+        [(0.28, 0.51), (0.52, 0.51)]
+        + _arc((0.52, 0.595), 0.085, 270, 450)
+        + [(0.44, 0.68)]
+    )
+    leg = _quad((0.50, 0.68), (0.60, 0.70), (0.70, 0.80))
+    _path(draw, s, f_stroke, w, STROKE_MAIN)
+    _path(draw, s, r_stroke, w, STROKE_SOFT)
+    _path(draw, s, leg, w, STROKE_SOFT)
+    _dot(draw, s, 0.70, 0.23, 0.05 if size > 48 else 0.075)
+    return finish(image, size)
+
+
+LOGO_VARIANTS = {"arcos": logo_arcos, "factura": logo_factura, "fr": logo_fr}
+
+
+def draw_logo(size: int = 512) -> Image.Image:
+    return LOGO_VARIANTS[LOGO_VARIANT](size)
+
+
+def draw_logo_small(size: int) -> Image.Image:
+    """Stroke width already adapts to small sizes."""
+
+    return draw_logo(size)
 
 
 # ------------------------------------------------------------------------- glyphs
@@ -213,6 +312,21 @@ def g_coins(d: ImageDraw.ImageDraw, s: float, c: str, w: float) -> None:
         d.ellipse((s * 0.20, s * y, s * 0.80, s * (y + 0.18)), outline=c, width=int(w))
 
 
+def g_gear(d: ImageDraw.ImageDraw, s: float, c: str, w: float) -> None:
+    cx = cy = s * 0.5
+    teeth = 8
+    points = []
+    for index in range(teeth * 2):
+        angle = math.pi * index / teeth
+        radius = s * (0.40 if index % 2 == 0 else 0.31)
+        for offset in (-0.16, 0.16):
+            a = angle + offset * math.pi / teeth
+            points.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
+    d.polygon(points, outline=c, width=int(w))
+    r = s * 0.12
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=c, width=int(w))
+
+
 ICONS: dict[str, Glyph] = {
     "todo": g_play,
     "inspect": g_search,
@@ -230,6 +344,7 @@ ICONS: dict[str, Glyph] = {
     "pendientes": g_clock,
     "riesgo_alto": g_alert,
     "importe": g_coins,
+    "config": g_gear,
 }
 
 
@@ -259,8 +374,11 @@ def main() -> None:
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     logo = draw_logo(512)
     logo.save(ASSETS_DIR / "logo.png")
-    logo.save(ASSETS_DIR / "facturisk.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     draw_logo(64).save(ASSETS_DIR / "logo_64.png")
+    draw_logo_small(128).save(ASSETS_DIR / "logo_small.png")
+    # Windows icon: the simplified FR mark for small sizes, the full logo from 48 px.
+    frames = [draw_logo_small(size) for size in (16, 24, 32)] + [draw_logo(size) for size in (48, 64, 128, 256)]
+    frames[-1].save(ASSETS_DIR / "facturisk.ico", format="ICO", sizes=[frame.size for frame in frames], append_images=frames[:-1])
 
     for name, glyph in ICONS.items():
         draw_icon(glyph, PALETTE["nav_icon"]).save(ASSETS_DIR / f"nav_{name}.png")
