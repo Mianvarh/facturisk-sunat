@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Mianvarh/facturisk-sunat/actions/workflows/ci.yml"><img src="https://github.com/Mianvarh/facturisk-sunat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11">
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/scikit--learn-1.7-F7931E?logo=scikitlearn&logoColor=white" alt="scikit-learn">
   <img src="https://img.shields.io/badge/MongoDB-optional-47A248?logo=mongodb&logoColor=white" alt="MongoDB">
   <img src="https://img.shields.io/badge/license-MIT-0E7C66" alt="MIT License">
@@ -87,11 +87,16 @@ Evaluated on the most recent 20% of the invoices (chronological hold-out test se
 ```bash
 git clone https://github.com/Mianvarh/facturisk-sunat.git
 cd facturisk-sunat
+python -m venv .venv
+.venv\Scripts\activate                     # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt            # optional: pip install -r requirements-optional.txt
 
 python main.py gui                         # desktop app
 python main.py todo                        # or run the whole pipeline from the terminal
+python scripts/crear_acceso_directo.py     # Windows: desktop shortcut with the app icon
 ```
+
+> On Windows, prefer the python.org installer over the Microsoft Store build: Store Python runs as a packaged app, so the taskbar always shows the Python logo instead of the FactuRisk icon.
 
 The repository ships with everything needed to run **offline**: the invoice dataset and a SUNAT snapshot. Scraping the live registry and using MongoDB are optional:
 
@@ -157,4 +162,4 @@ The desktop interface redesign, visual identity and code audit were done with AI
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The bundled [Outfit](https://github.com/Outfitio/Outfit-Fonts) typeface is licensed under the [SIL Open Font License 1.1](assets/fonts/OFL.txt).

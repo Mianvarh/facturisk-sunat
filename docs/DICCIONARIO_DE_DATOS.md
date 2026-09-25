@@ -36,21 +36,21 @@
 
 | Columna | Tipo detectado | Ejemplo | Origen | Tratamiento | Uso en modelo | Motivo de exclusión |
 |---|---:|---|---|---|---|---|
-| `Origen` | `object` | PreRegistros | Preparación | Conservada para trazabilidad | No |  |
-| `ID_Comprobante` | `object` | F001-57022055 | Preparación | Conservada para trazabilidad | No |  |
+| `Origen` | `str` | PreRegistros | Preparación | Conservada para trazabilidad | No |  |
+| `ID_Comprobante` | `str` | F001-57022055 | Preparación | Conservada para trazabilidad | No |  |
 | `RUC_Proveedor` | `int64` | 20493434340 | Preparación | Conservada para trazabilidad | No |  |
-| `Tipo_Comprobante` | `object` | Factura | Preparación | Normalizada/derivada | Sí |  |
-| `Fecha_Creacion` | `object` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
-| `Fecha_Emision` | `object` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
-| `Fecha_Vencimiento` | `object` | 2025-10-01 | Preparación | Conservada para trazabilidad | No |  |
-| `Fecha_Pago` | `object` | 2025-10-01 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Moneda` | `object` | PEN | Preparación | Normalizada/derivada | Sí |  |
+| `Tipo_Comprobante` | `str` | Factura | Preparación | Normalizada/derivada | Sí |  |
+| `Fecha_Creacion` | `str` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
+| `Fecha_Emision` | `str` | 2025-08-02 | Preparación | Conservada para trazabilidad | No |  |
+| `Fecha_Vencimiento` | `str` | 2025-10-01 | Preparación | Conservada para trazabilidad | No |  |
+| `Fecha_Pago` | `str` | 2025-10-01 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
+| `Moneda` | `str` | PEN | Preparación | Normalizada/derivada | Sí |  |
 | `Importe_Total` | `float64` | 1749.85 | Preparación | Normalizada/derivada | Sí |  |
-| `Estado` | `object` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Grupo` | `object` | Emitida / Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Emision` | `object` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Aceptacion` | `object` | Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
-| `Estado_Pago` | `object` | Pagada | Preparación | Conservada para trazabilidad | No |  |
+| `Estado` | `str` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
+| `Estado_Grupo` | `str` | Emitida / Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
+| `Estado_Emision` | `str` | Emitida | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
+| `Estado_Aceptacion` | `str` | Aceptada | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
+| `Estado_Pago` | `str` | Pagada | Preparación | Conservada para trazabilidad | No |  |
 | `Flag_Factura` | `int64` | 1 | Preparación | Conservada para trazabilidad | No |  |
 | `Flag_Emitida` | `int64` | 1 | Preparación | Conservada para trazabilidad | No |  |
 | `Flag_Aceptada` | `int64` | 1 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
@@ -58,20 +58,20 @@
 | `Flag_Rechazada` | `int64` | 0 | Preparación | Conservada para trazabilidad | No | Fuga de información o resultado conocido |
 | `Flag_Pendiente_Pago` | `int64` | 0 | Preparación | Conservada para trazabilidad | No |  |
 | `Anio` | `int64` | 2025 | Preparación | Conservada para trazabilidad | No |  |
-| `Trimestre` | `object` | Q3 | Preparación | Conservada para trazabilidad | No |  |
+| `Trimestre` | `str` | Q3 | Preparación | Conservada para trazabilidad | No |  |
 | `Mes_Num` | `int64` | 8 | Preparación | Conservada para trazabilidad | No |  |
-| `Mes` | `object` | Agosto | Preparación | Conservada para trazabilidad | No |  |
-| `Anio_Mes` | `object` | 2025-08 | Preparación | Conservada para trazabilidad | No |  |
+| `Mes` | `str` | Agosto | Preparación | Conservada para trazabilidad | No |  |
+| `Anio_Mes` | `str` | 2025-08 | Preparación | Conservada para trazabilidad | No |  |
 | `Orden_Anio_Mes` | `int64` | 202508 | Preparación | Conservada para trazabilidad | No |  |
 | `RUC` | `int64` | 20493434340 | Preparación | Conservada para trazabilidad | No |  |
-| `Razon_Social_SUNAT` | `float64` |  | Preparación | Conservada para trazabilidad | No |  |
-| `Estado_RUC` | `object` | ACTIVO | Preparación | Normalizada/derivada | Sí |  |
-| `Condicion_Domicilio` | `object` | HABIDO | Preparación | Normalizada/derivada | Sí |  |
+| `Razon_Social_SUNAT` | `str` |  | Preparación | Conservada para trazabilidad | No |  |
+| `Estado_RUC` | `str` | ACTIVO | Preparación | Normalizada/derivada | Sí |  |
+| `Condicion_Domicilio` | `str` | HABIDO | Preparación | Normalizada/derivada | Sí |  |
 | `Ubigeo` | `int64` | 160101 | Preparación | Conservada para trazabilidad | No |  |
-| `Domicilio_Fiscal` | `float64` |  | Preparación | Conservada para trazabilidad | No |  |
+| `Domicilio_Fiscal` | `str` |  | Preparación | Conservada para trazabilidad | No |  |
 | `Situacion_Tributaria_Actual` | `int64` | 0 | Preparación | Normalizada/derivada | Sí |  |
-| `Fecha_Consulta` | `object` | 2026-07-23 | Preparación | Conservada para trazabilidad | No |  |
-| `Fuente` | `object` | SUNAT - Padrón Reducido (snapshot) | Preparación | Conservada para trazabilidad | No |  |
+| `Fecha_Consulta` | `str` | 2026-09-25 | Preparación | Conservada para trazabilidad | No |  |
+| `Fuente` | `str` | SUNAT - Padrón Reducido | Preparación | Conservada para trazabilidad | No |  |
 | `SUNAT_Encontrado` | `int64` | 1 | Preparación | Normalizada/derivada | Sí |  |
 | `plazo_dias` | `int64` | 60 | Preparación | Normalizada/derivada | Sí |  |
 | `mes_emision` | `int64` | 8 | Preparación | Normalizada/derivada | Sí |  |

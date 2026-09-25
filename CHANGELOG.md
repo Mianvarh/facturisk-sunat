@@ -13,7 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   palette), responsive layout that reflows at any window size, and a risk
   dashboard module with KPIs, charts, a priority table and the model chart
   gallery.
-- Pipeline charts use the product palette.
+- Dark theme inspired by modern analytics dashboards: blue / violet / pink
+  risk scale, ring gauge, segmented meter, status pills, amount-vs-probability
+  quadrant chart, type-by-month heatmap and lollipop chart of risk factors.
+- Pipeline charts (training, preparation and prediction) use the dark palette.
+- SUNAT data-source indicator in the machine learning module.
+- Visual redesign: violet-black palette, bundled Outfit typeface (OFL), solid
+  color icon tiles, antialiased rounded cards and pill buttons, hero banner,
+  rounded sidebar selection and a segmented risk filter for the priority table.
+- Windows taskbar and window use the FactuRisk icon (explicit AppUserModelID)
+  and `scripts/crear_acceso_directo.py` creates a desktop shortcut.
+
+### Fixed
+
+- The desktop app no longer closes silently when started with pythonw.exe
+  (no console available for pipeline log messages).
 
 ## [1.0.0] - 2026-09-25
 
