@@ -12,6 +12,9 @@ from dashboard_data import (
     load_dashboard_data,
     risk_heatmap,
     risk_level_counts,
+    filter_predictions,
+    padron_risk,
+    supplier_names,
     top_risk_factors,
 )
 
@@ -145,3 +148,63 @@ def test_amount_vs_probability_drops_nonpositive_amounts_and_respects_sample_siz
     assert len(sampled) == 3
     assert (sampled["Importe_Total"] > 0).all()
     assert sampled.columns.tolist() == ["Importe_Total", "Probabilidad_Incidencia", "Nivel_Riesgo"]
+
+
+def test_supplier_names_prioritizes_imported_name_then_sunat_and_uses_empty_when_missing() -> None:
+    predictions = pd.DataFrame(
+        {
+            "Razon_Social_Proveedor": ["Nombre importado", "  ", None],
+            "Razon_Social_SUNAT": ["Nombre SUNAT", "Nombre de SUNAT", None],
+        }
+    )
+
+    result = supplier_names(predictions)
+
+    assert result.tolist() == ["Nombre importado", "Nombre de SUNAT", ""]
+
+
+def test_filter_predictions_combines_all_filters_and_searches_id_ruc_and_nombre() -> None:
+    predictions = pd.DataFrame(
+        {
+            "ID_Comprobante": ["FAC-Alpha", "FAC-Beta", "FAC-Gamma", "FAC-Delta"],
+            "RUC_Proveedor": ["20111111111", "20222222222", "20333333333", "20444444444"],
+            "Razon_Social_Proveedor": ["Proveedor Uno", "Empresa Alpha", "Tercero", "Proveedor Cuatro"],
+            "Tipo_Comprobante": ["Factura", "Factura", "Boleta", "Factura"],
+            "Nivel_Riesgo": ["Alto", "Alto", "Alto", "Medio"],
+            "Razones_Principales": ["Estado RUC BAJA DE OFICIO", "Monto elevado", "Estado RUC INACTIVO", "Estado RUC BAJA"],
+        }
+    )
+
+    filtered = filter_predictions(
+        predictions,
+        level="Alto",
+        text="pRoVeEdOr uNo",
+        tipo="Factura",
+        ruc="20111111111",
+        factor="Estado RUC irregular",
+    )
+    by_id = filter_predictions(predictions, text="alpha")
+    by_ruc = filter_predictions(predictions, text="20333333333")
+    by_name = filter_predictions(predictions, text="EMPRESA ALPHA")
+
+    assert filtered["ID_Comprobante"].tolist() == ["FAC-Alpha"]
+    assert by_id["ID_Comprobante"].tolist() == ["FAC-Alpha", "FAC-Beta"]
+    assert by_ruc["ID_Comprobante"].tolist() == ["FAC-Gamma"]
+    assert by_name["ID_Comprobante"].tolist() == ["FAC-Beta"]
+
+
+def test_padron_risk_omite_padron_sin_miembros_y_calcula_porcentajes() -> None:
+    predictions = pd.DataFrame(
+        {
+            "Nivel_Riesgo": ["Alto", "Bajo", "Alto", "Medio"],
+            "Es_Agente": [1, 1, 0, 0],
+            "Es_Vacio": [0, 0, 0, 0],
+        }
+    )
+
+    result = padron_risk(predictions, {"Es_Agente": "Agentes", "Es_Vacio": "Sin miembros"})
+
+    assert result["padron"].tolist() == ["Agentes"]
+    assert result["dentro"].tolist() == [50.0]
+    assert result["fuera"].tolist() == [50.0]
+    assert result["comprobantes"].tolist() == [2]
