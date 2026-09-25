@@ -42,6 +42,7 @@ from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from configuracion import PADRON_COLUMNS
 from feature_engineering import HISTORICAL_FEATURES
 from transformadores import RellenadorNAcategoricas
 from paths import ensure_directories, get_application_root
@@ -69,6 +70,7 @@ SUNAT_FEATURES = [
     "Condicion_Domicilio",
     "Situacion_Tributaria_Actual",
     "SUNAT_Encontrado",
+    *PADRON_COLUMNS,
 ]
 
 BASE_FEATURES = [

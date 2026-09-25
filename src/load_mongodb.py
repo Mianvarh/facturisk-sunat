@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from dotenv import load_dotenv
 from pymongo import ASCENDING, MongoClient, UpdateOne
 from pymongo.collection import Collection
 from pymongo.errors import BulkWriteError, PyMongoError
 
+from configuracion import PADRON_COLUMNS, cargar_mongo_config
+from fuentes_externas import cargar_variables_padrones
 from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, normalizar_ruc
 from paths import ensure_directories, get_application_root
 
@@ -67,23 +66,12 @@ def configurar_logging() -> None:
 
 
 def cargar_configuracion() -> MongoConfig | None:
-    """Load MongoDB configuration without exposing credentials; None when not configured."""
+    """MongoDB settings from the panel or .env; None when not configured."""
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    uri = os.getenv("MONGODB_URI")
-    database = os.getenv("MONGODB_DATABASE")
-    collection = os.getenv("MONGODB_COLLECTION_SUNAT")
-
-    config_path = PROJECT_ROOT / "config" / "configuracion.json"
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8-sig") as file:
-            config_data = json.load(file)
-        uri = uri or config_data.get("mongodb_uri")
-        database = database or config_data.get("mongodb_database")
-        collection = collection or config_data.get("mongodb_collection")
-
-    if not (uri and database and collection):
+    config = cargar_mongo_config()
+    if config is None:
         return None
+    uri, database, collection = config
     return MongoConfig(uri=uri, database=database, collection=collection)
 
 
@@ -166,6 +154,9 @@ def preparar_documentos(df: pd.DataFrame) -> list[dict[str, Any]]:
             "Fecha_Consulta": convertir_fecha(row["Fecha_Consulta"]),
             "Fuente": none_if_missing(row["Fuente"]),
         }
+        for column in PADRON_COLUMNS:
+            if column in row and not pd.isna(row[column]):
+                documento[column] = int(row[column])
         documentos.append(documento)
 
     if invalid_rucs:
@@ -250,6 +241,9 @@ def cargar_proveedores_mongodb() -> LoadStats:
         print("El pipeline continuara con el respaldo local de SUNAT.")
         return LoadStats()
     df = leer_proveedores_sunat()
+    padrones = cargar_variables_padrones()
+    if padrones is not None:
+        df = df.merge(padrones, how="left", on="RUC")
     documentos = preparar_documentos(df)
 
     client: MongoClient | None = None

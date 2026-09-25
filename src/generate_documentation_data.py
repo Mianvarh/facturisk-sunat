@@ -174,7 +174,7 @@ def collect_summary() -> dict[str, Any]:
 
 
 # Columns that can hold names or addresses of companies or people; never shown as examples.
-PRIVATE_COLUMNS = {"Proveedor", "Ruc Proveedor", "Cliente", "Razon_Social_SUNAT", "Domicilio_Fiscal"}
+PRIVATE_COLUMNS = {"Proveedor", "Ruc Proveedor", "Cliente", "Razon_Social_SUNAT", "Razon_Social_Proveedor", "Domicilio_Fiscal"}
 
 
 def table_columns(path: Path, sep: str, origin: str, model_features: list[str], forbidden: list[str]) -> str:

@@ -19,7 +19,9 @@ import requests
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
-from datos import COMPROBANTES_PATH, leer_rucs_proveedores
+from configuracion import cargar_ajustes
+from datos import leer_rucs_proveedores, ruta_comprobantes
+from fuentes_externas import construir_variables_padrones
 from paths import ensure_directories, get_application_root
 
 PROJECT_ROOT = get_application_root()
@@ -94,9 +96,10 @@ def normalizar_ruc(value: object) -> str | None:
     return None
 
 
-def leer_rucs_empresariales(dataset_path: Path = COMPROBANTES_PATH) -> set[str]:
-    """Read unique supplier RUCs from the enterprise dataset."""
+def leer_rucs_empresariales(dataset_path: Path | None = None) -> set[str]:
+    """Read unique supplier RUCs from the active enterprise dataset."""
 
+    dataset_path = dataset_path or ruta_comprobantes()
     logging.info("Leyendo RUC unicos del dataset empresarial: %s", dataset_path)
     rucs = leer_rucs_proveedores(dataset_path)
     if not rucs:
@@ -588,9 +591,16 @@ def obtener_datos_sunat(
     fecha_consulta = datetime.now().date().isoformat()
 
     rucs_buscados = leer_rucs_empresariales()
-    zip_url = encontrar_url_zip()
-    zip_path = descargar_zip(zip_url, force_download=force_download, max_age_days=max_age_days)
-    extracted_files = obtener_archivos_extraidos(zip_path)
+    source = resolver_fuente_padron()
+    if source["tipo"] == "archivo":
+        local = Path(source["valor"])
+        logging.info("Usando padrón local configurado: %s", local)
+        zip_path = local
+        extracted_files = obtener_archivos_extraidos(local) if zipfile.is_zipfile(local) else [local]
+    else:
+        zip_url = source["valor"] if source["tipo"] == "zip" else encontrar_url_zip(source["valor"])
+        zip_path = descargar_zip(zip_url, force_download=force_download, max_age_days=max_age_days)
+        extracted_files = obtener_archivos_extraidos(zip_path)
     main_file = detectar_archivo_principal(extracted_files)
     format_info = detectar_formato_padron(main_file)
 
@@ -611,7 +621,24 @@ def obtener_datos_sunat(
         proveedores["RUC"].nunique() if "RUC" in proveedores.columns else 0,
         len(rucs_buscados - set(proveedores.get("RUC", pd.Series(dtype='string')).dropna().tolist())),
     )
+    construir_variables_padrones(rucs_buscados, force=force_download)
     return proveedores
+
+
+def resolver_fuente_padron() -> dict[str, str]:
+    """Registry source from the settings panel: local file, direct ZIP URL or page to scrape."""
+
+    settings = cargar_ajustes()["sunat"]
+    local = (settings.get("archivo_local") or "").strip()
+    if local:
+        path = Path(local)
+        if not path.exists():
+            raise FileNotFoundError(f"No existe el archivo local del padrón configurado: {path}")
+        return {"tipo": "archivo", "valor": str(path)}
+    direct = (settings.get("zip_url") or "").strip()
+    if direct:
+        return {"tipo": "zip", "valor": direct}
+    return {"tipo": "pagina", "valor": (settings.get("pagina_padron") or SUNAT_PAGE_URL).strip()}
 
 
 def parse_args() -> argparse.Namespace:
@@ -626,12 +653,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-age-days",
         type=float,
-        default=SUNAT_ZIP_MAX_AGE_DAYS,
-        help=f"Edad maxima del ZIP reutilizable en dias (por defecto: {SUNAT_ZIP_MAX_AGE_DAYS}).",
+        default=None,
+        help="Edad maxima del ZIP reutilizable en dias (por defecto: la del panel de configuracion).",
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    obtener_datos_sunat(force_download=args.force_download, max_age_days=args.max_age_days)
+    max_age = args.max_age_days if args.max_age_days is not None else float(cargar_ajustes()["sunat"].get("max_age_days", SUNAT_ZIP_MAX_AGE_DAYS))
+    obtener_datos_sunat(force_download=args.force_download, max_age_days=max_age)

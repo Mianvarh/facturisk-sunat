@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import date, datetime
 from typing import Any
 
@@ -15,10 +14,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from configuracion import PADRON_COLUMNS, cargar_mongo_config
+from fuentes_externas import cargar_variables_padrones
 from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, leer_comprobantes, normalizar_ruc
 from feature_engineering import HISTORICAL_FEATURES, crear_variables_historicas_sin_fuga
 from paths import ensure_directories, get_application_root
@@ -60,6 +60,7 @@ VARIABLES_CANDIDATAS_CORRELACION = [
     "Condicion_Domicilio",
     "Situacion_Tributaria_Actual",
     "SUNAT_Encontrado",
+    *PADRON_COLUMNS,
     *HISTORICAL_FEATURES,
 ]
 
@@ -108,22 +109,9 @@ def leer_historico() -> pd.DataFrame:
 
 
 def cargar_config_mongodb() -> tuple[str, str, str] | None:
-    """Load MongoDB settings from .env or portable JSON config; None when not configured."""
+    """MongoDB settings from the panel or .env; None when not configured."""
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    uri = os.getenv("MONGODB_URI")
-    database = os.getenv("MONGODB_DATABASE")
-    collection = os.getenv("MONGODB_COLLECTION_SUNAT")
-    config_path = PROJECT_ROOT / "config" / "configuracion.json"
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8-sig") as file:
-            config_data = json.load(file)
-        uri = uri or config_data.get("mongodb_uri")
-        database = database or config_data.get("mongodb_database")
-        collection = collection or config_data.get("mongodb_collection")
-    if not (uri and database and collection):
-        return None
-    return str(uri), str(database), str(collection)
+    return cargar_mongo_config()
 
 
 def normalizar_sunat(df_sunat: pd.DataFrame, origen: str) -> pd.DataFrame:
@@ -187,6 +175,23 @@ def cargar_sunat() -> pd.DataFrame:
     raise FileNotFoundError(
         "No hay datos SUNAT disponibles. Ejecute la fase de scraping o configure MongoDB."
     )
+
+
+def agregar_padrones(df: pd.DataFrame) -> pd.DataFrame:
+    """Add 0/1 membership flags of the extra SUNAT registries (0 when unavailable)."""
+
+    padrones = cargar_variables_padrones()
+    if padrones is None:
+        logging.info("Sin padrones SUNAT adicionales: las variables se completan con 0.")
+        for column in PADRON_COLUMNS:
+            df[column] = 0
+        return df
+    merged = df.merge(padrones.rename(columns={"RUC": "_RUC_padron"}), how="left", left_on="RUC_Proveedor", right_on="_RUC_padron")
+    merged = merged.drop(columns=["_RUC_padron"])
+    for column in PADRON_COLUMNS:
+        merged[column] = merged[column].fillna(0).astype(int)
+    logging.info("Padrones SUNAT agregados: %s", {column: int(merged[column].sum()) for column in PADRON_COLUMNS})
+    return merged
 
 
 def agregar_variables(df: pd.DataFrame) -> pd.DataFrame:
@@ -438,6 +443,7 @@ def preparar_dataset() -> tuple[pd.DataFrame, pd.DataFrame]:
     df_historico = leer_historico()
     df_sunat = cargar_sunat()
     df_completo, merge_stats = combinar_historico_sunat(df_historico, df_sunat)
+    df_completo = agregar_padrones(df_completo)
     df_completo = agregar_variables(df_completo)
     df_completo, leakage_report = crear_variables_historicas_sin_fuga(df_completo)
     logging.info("Control de fuga feature engineering: %s", leakage_report["resultado_control_fuga"])

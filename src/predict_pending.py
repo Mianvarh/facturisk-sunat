@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import ensure_directories, get_application_root
+from configuracion import PADRON_COLUMNS
 from theme import PALETTE, RISK_COLORS, apply_chart_style
 
 apply_chart_style()
@@ -33,6 +34,8 @@ INPUT_COLUMNS = [
     "Condicion_Domicilio",
     "Situacion_Tributaria_Actual",
 ]
+# Included only when present: names and addresses exist only in local data.
+OPTIONAL_COLUMNS = ["Razon_Social_Proveedor", "Domicilio_Fiscal", "Ubigeo", *PADRON_COLUMNS]
 OUTPUT_COLUMNS = [
     *INPUT_COLUMNS,
     "Probabilidad_Incidencia",
@@ -150,13 +153,14 @@ def predecir_pendientes() -> pd.DataFrame:
     probabilities = pipeline.predict_proba(x_pending)[:, 1]
     predictions = (probabilities >= threshold).astype(int)
 
-    output = df[INPUT_COLUMNS].copy()
+    extra = [column for column in OPTIONAL_COLUMNS if column in df.columns]
+    output = df[INPUT_COLUMNS + extra].copy()
     output["Probabilidad_Incidencia"] = probabilities
     output["Prediccion_Codigo"] = predictions
     output["Prediccion_Texto"] = output["Prediccion_Codigo"].map(PREDICTION_LABELS)
     output["Nivel_Riesgo"] = output["Probabilidad_Incidencia"].map(calcular_nivel_riesgo)
     output["Razones_Principales"] = df.apply(explicar_fila, axis=1)
-    output = output[OUTPUT_COLUMNS]
+    output = output[OUTPUT_COLUMNS + extra]
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
