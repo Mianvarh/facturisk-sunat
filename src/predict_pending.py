@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import ensure_directories, get_application_root
-from theme import apply_chart_style
+from theme import PALETTE, RISK_COLORS, apply_chart_style
 
 apply_chart_style()
 
@@ -209,17 +209,17 @@ def generar_graficos_pendientes(output: pd.DataFrame) -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     risk_counts = output["Nivel_Riesgo"].value_counts().reindex(["Bajo", "Medio", "Alto"], fill_value=0)
     fig, ax = plt.subplots(figsize=(7, 5))
-    risk_counts.plot(kind="bar", ax=ax)
+    risk_counts.plot(kind="bar", ax=ax, color=[RISK_COLORS[level] for level in risk_counts.index])
     ax.set_title("Distribucion de riesgo en comprobantes pendientes")
     ax.set_ylabel("Cantidad")
-    ax.bar_label(ax.containers[0])
+    ax.bar_label(ax.containers[0], color=PALETTE["muted"])
     fig.tight_layout()
     fig.savefig(OUTPUTS_DIR / "16_distribucion_riesgo_pendientes.png", dpi=160)
     plt.close(fig)
 
     top = output.nlargest(20, "Probabilidad_Incidencia")
     fig, ax = plt.subplots(figsize=(11, 6))
-    top.plot(kind="bar", x="ID_Comprobante", y="Probabilidad_Incidencia", ax=ax, legend=False)
+    top.plot(kind="bar", x="ID_Comprobante", y="Probabilidad_Incidencia", ax=ax, legend=False, color=PALETTE["danger"])
     ax.set_title("Top 20 comprobantes pendientes por probabilidad de incidencia")
     ax.set_ylabel("Probabilidad de incidencia")
     ax.tick_params(axis="x", rotation=70)

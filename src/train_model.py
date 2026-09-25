@@ -45,7 +45,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from feature_engineering import HISTORICAL_FEATURES
 from transformadores import RellenadorNAcategoricas
 from paths import ensure_directories, get_application_root
-from theme import apply_chart_style
+from theme import CHART_SERIES, PALETTE, apply_chart_style, sequential_cmap
 
 
 apply_chart_style()
@@ -673,7 +673,9 @@ def save_confusion(cm: list[list[int]], path: Path, title: str) -> None:
     """Save a confusion matrix plot."""
 
     fig, ax = plt.subplots(figsize=(5.5, 4.8))
-    image = ax.imshow(cm, cmap="Blues")
+    cmap = sequential_cmap()
+    image = ax.imshow(cm, cmap=cmap)
+    ax.grid(False)
     fig.colorbar(image, ax=ax)
     ax.set_xticks([0, 1], labels=["Aceptada", "Incidencia"])
     ax.set_yticks([0, 1], labels=["Aceptada", "Incidencia"])
@@ -682,7 +684,11 @@ def save_confusion(cm: list[list[int]], path: Path, title: str) -> None:
     ax.set_title(title)
     for i in range(2):
         for j in range(2):
-            ax.text(j, i, cm[i][j], ha="center", va="center")
+            normalized_value = image.norm(cm[i][j])
+            red, green, blue, _ = cmap(normalized_value)
+            luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            text_color = "#FFFFFF" if luminance < 0.45 else PALETTE["background"]
+            ax.text(j, i, cm[i][j], ha="center", va="center", color=text_color)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -692,7 +698,23 @@ def bar_plot(df: pd.DataFrame, x: str, y: str, path: Path, title: str, ylabel: s
     """Save a simple bar plot."""
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    df.plot(kind="bar", x=x, y=y, ax=ax, legend=False)
+    if "experimento" in df.columns and x == "modelo_experimento":
+        from matplotlib.patches import Patch
+
+        experiment_colors = {"A_sin_sunat": PALETTE["subtle"], "B_con_sunat": PALETTE["primary"]}
+        colors = [experiment_colors.get(value, CHART_SERIES[0]) for value in df["experimento"]]
+        df.plot(kind="bar", x=x, y=y, ax=ax, legend=False, color=colors)
+        ax.legend(
+            handles=[
+                Patch(facecolor=PALETTE["subtle"], label="A_sin_sunat"),
+                Patch(facecolor=PALETTE["primary"], label="B_con_sunat"),
+            ],
+            loc="lower right",
+            bbox_to_anchor=(1, 1.01),
+            ncols=2,
+        )
+    else:
+        df.plot(kind="bar", x=x, y=y, ax=ax, legend=False, color=CHART_SERIES[0])
     ax.set_title(title)
     ax.set_ylabel(ylabel)
     ax.tick_params(axis="x", rotation=35)
@@ -721,22 +743,22 @@ def generate_graphs(
     precision, recall, _ = precision_recall_curve(test[TARGET], scores)
     fpr, tpr, _ = roc_curve(test[TARGET], scores)
 
-    df[TARGET].value_counts().sort_index().plot(kind="bar", title="Distribucion de clases")
+    df[TARGET].value_counts().sort_index().plot(kind="bar", title="Distribucion de clases", color=CHART_SERIES[0])
     plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "01_distribucion_clases.png", dpi=160); plt.close()
 
     nulls = df[FEATURES_WITH_SUNAT + [TARGET]].isna().sum().sort_values(ascending=False).head(20)
-    nulls.plot(kind="bar", title="Valores nulos principales")
+    nulls.plot(kind="bar", title="Valores nulos principales", color=CHART_SERIES[1])
     plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "02_calidad_datos.png", dpi=160); plt.close()
 
-    df["SUNAT_Encontrado"].value_counts().sort_index().plot(kind="bar", title="Cobertura SUNAT")
+    df["SUNAT_Encontrado"].value_counts().sort_index().plot(kind="bar", title="Cobertura SUNAT", color=CHART_SERIES[2])
     plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "03_cobertura_sunat.png", dpi=160); plt.close()
 
     comparison["modelo_experimento"] = comparison["modelo"] + " - " + comparison["experimento"]
     bar_plot(comparison, "modelo_experimento", "pr_auc", OUTPUTS_DIR / "04_comparacion_modelos_pr_auc.png", "Comparacion PR-AUC", "PR-AUC")
     bar_plot(comparison, "modelo_experimento", "f1_clase_1", OUTPUTS_DIR / "05_comparacion_modelos_f1.png", "Comparacion F1 clase incidencia", "F1")
 
-    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(recall, precision); ax.set_title("Curva Precision-Recall"); ax.set_xlabel("Recall"); ax.set_ylabel("Precision"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "06_precision_recall_curve.png", dpi=160); plt.close(fig)
-    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(fpr, tpr); ax.plot([0, 1], [0, 1], "--"); ax.set_title("Curva ROC"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "07_roc_curve.png", dpi=160); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(recall, precision, color=PALETTE["primary"]); ax.set_title("Curva Precision-Recall"); ax.set_xlabel("Recall"); ax.set_ylabel("Precision"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "06_precision_recall_curve.png", dpi=160); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(fpr, tpr, color=PALETTE["primary"]); ax.plot([0, 1], [0, 1], linestyle="--", color=PALETTE["subtle"]); ax.set_title("Curva ROC"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "07_roc_curve.png", dpi=160); plt.close(fig)
 
     save_confusion(confusion_matrix(test[TARGET], pred_050, labels=[0, 1]).tolist(), OUTPUTS_DIR / "08_matriz_confusion_050.png", "Matriz de confusion umbral 0.50")
     save_confusion(confusion_matrix(test[TARGET], pred_opt, labels=[0, 1]).tolist(), OUTPUTS_DIR / "09_matriz_confusion_optimizada.png", "Matriz de confusion umbral optimizado")
@@ -744,21 +766,21 @@ def generate_graphs(
     save_confusion(confusion_matrix(test[TARGET], pred_050, labels=[0, 1]).tolist(), OUTPUTS_DIR / "matriz_confusion.png", "Matriz de confusion umbral 0.50")
 
     best_thresholds = threshold_df[(threshold_df["modelo"] == best.model_name) & (threshold_df["experimento"] == best.experiment)]
-    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["f1_clase_1"], label="F1"); ax.plot(best_thresholds["umbral"], best_thresholds["recall_clase_1"], label="Recall"); ax.plot(best_thresholds["umbral"], best_thresholds["precision_clase_1"], label="Precision"); ax.legend(); ax.set_title("Metricas por umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "10_metricas_por_umbral.png", dpi=160); plt.close(fig)
-    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["falsos_positivos"]); ax.set_title("Falsos positivos por umbral"); ax.set_xlabel("Umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "11_falsos_positivos_por_umbral.png", dpi=160); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["f1_clase_1"], label="F1", color=PALETTE["primary"]); ax.plot(best_thresholds["umbral"], best_thresholds["recall_clase_1"], label="Recall", color=PALETTE["danger"]); ax.plot(best_thresholds["umbral"], best_thresholds["precision_clase_1"], label="Precision", color=PALETTE["accent"]); ax.axvline(best.threshold, linestyle="--", color=PALETTE["danger"], label=f"Umbral elegido ({best.threshold:.2f})"); ax.legend(); ax.set_title("Metricas por umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "10_metricas_por_umbral.png", dpi=160); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["falsos_positivos"], color=PALETTE["primary"]); ax.set_title("Falsos positivos por umbral"); ax.set_xlabel("Umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "11_falsos_positivos_por_umbral.png", dpi=160); plt.close(fig)
 
     prob_true, prob_pred = calibration_curve(test[TARGET], scores, n_bins=10, strategy="quantile")
-    fig, ax = plt.subplots(figsize=(6, 5)); ax.plot(prob_pred, prob_true, marker="o"); ax.plot([0, 1], [0, 1], "--"); ax.set_title("Curva de calibracion"); ax.set_xlabel("Probabilidad media"); ax.set_ylabel("Fraccion positiva"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "12_curva_calibracion.png", dpi=160); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(6, 5)); ax.plot(prob_pred, prob_true, marker="o", color=PALETTE["primary"]); ax.plot([0, 1], [0, 1], linestyle="--", color=PALETTE["subtle"]); ax.set_title("Curva de calibracion"); ax.set_xlabel("Probabilidad media"); ax.set_ylabel("Fraccion positiva"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "12_curva_calibracion.png", dpi=160); plt.close(fig)
 
     importance_df = variable_importance(best, test)
-    importance_df.head(20).plot(kind="barh", x="variable", y="importancia", legend=False, title="Importancia de variables")
+    importance_df.head(20).plot(kind="barh", x="variable", y="importancia", legend=False, title="Importancia de variables", color=CHART_SERIES[0])
     plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "13_importancia_variables.png", dpi=160); plt.close()
     if importlib.util.find_spec("shap") is None:
         (OUTPUTS_DIR / "14_shap_resumen.txt").write_text("SHAP no esta instalado. Comando sugerido: pip install shap\n", encoding="utf-8")
 
     if not aporte.empty:
         aporte_plot = aporte[["modelo", "pr_auc_delta_abs", "f1_clase_1_delta_abs", "recall_clase_1_delta_abs"]].set_index("modelo")
-        aporte_plot.plot(kind="bar", title="Aporte de variables SUNAT")
+        aporte_plot.plot(kind="bar", title="Aporte de variables SUNAT", color=CHART_SERIES)
         plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "15_aporte_sunat.png", dpi=160); plt.close()
 
     return {"importance": importance_df, "calibration": calibration_report}

@@ -22,7 +22,7 @@ from pymongo.errors import PyMongoError
 from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, leer_comprobantes, normalizar_ruc
 from feature_engineering import HISTORICAL_FEATURES, crear_variables_historicas_sin_fuga
 from paths import ensure_directories, get_application_root
-from theme import apply_chart_style
+from theme import PALETTE, apply_chart_style, diverging_cmap
 
 
 apply_chart_style()
@@ -369,16 +369,20 @@ def generar_matriz_correlacion_pearson(dataset_modelo: pd.DataFrame) -> dict[str
     ).to_csv(csv_path, index=False, encoding="utf-8-sig")
 
     plt.figure(figsize=(14, 10))
-    sns.heatmap(
+    heatmap = sns.heatmap(
         selected_corr,
-        cmap="RdYlBu_r",
+        cmap=diverging_cmap(),
         center=0,
         annot=True,
         fmt=".2f",
+        annot_kws={"color": PALETTE["text"]},
         linewidths=0.4,
-        linecolor="#FFFFFF",
+        linecolor=PALETTE["background"],
         cbar_kws={"label": "Correlacion Pearson"},
     )
+    colorbar = heatmap.collections[0].colorbar
+    colorbar.ax.tick_params(colors=PALETTE["muted"])
+    colorbar.set_label("Correlacion Pearson", color=PALETTE["muted"])
     plt.title("Matriz de calor Pearson - variables candidatas vs incidencia", fontsize=14, pad=16)
     plt.xticks(rotation=45, ha="right", fontsize=8)
     plt.yticks(rotation=0, fontsize=8)
