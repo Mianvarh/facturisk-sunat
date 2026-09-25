@@ -553,3 +553,40 @@ class HeroBanner(tk.Canvas):
         tk.Canvas.configure(self.button, background=self.button.parent_bg)
         self.button._draw()
         self.create_window(30, height - 26, window=self.button, anchor="sw")
+
+
+class FitLabel(ttk.Label):
+    """Label whose font shrinks until the text fits the width of its container."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        textvariable: tk.StringVar | None = None,
+        text: str = "",
+        max_size: int = 22,
+        min_size: int = 11,
+        family: str | None = None,
+        style: str = "CardValue.TLabel",
+    ) -> None:
+        self.fit_font = tk.font.Font(family=family or FONT_SEMIBOLD, size=max_size)
+        self.max_size = max_size
+        self.min_size = min_size
+        options: dict[str, Any] = {"style": style, "font": self.fit_font}
+        if textvariable is not None:
+            options["textvariable"] = textvariable
+            textvariable.trace_add("write", lambda *_args: self.after_idle(self._fit))
+        else:
+            options["text"] = text
+        super().__init__(parent, **options)
+        parent.bind("<Configure>", lambda _event: self._fit(), add="+")
+
+    def _fit(self) -> None:
+        available = self.master.winfo_width() - 4
+        if available <= 4:
+            return
+        text = self.cget("text") if not str(self.cget("textvariable")) else self.getvar(str(self.cget("textvariable")))
+        size = self.max_size
+        self.fit_font.configure(size=size)
+        while size > self.min_size and self.fit_font.measure(text) > available:
+            size -= 1
+            self.fit_font.configure(size=size)

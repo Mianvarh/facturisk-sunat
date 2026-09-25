@@ -24,7 +24,7 @@ from PIL import Image, ImageTk
 
 from paths import ensure_directories, get_application_root
 from theme import FONT_MEDIUM, FONT_MONO, PALETTE, configure_styles, model_display_name
-from ui_widgets import HeroBanner, NavItem, PillButton, ResponsiveGrid, RoundedCard, ScrollableFrame, StatusPill, card, load_icon
+from ui_widgets import FitLabel, HeroBanner, NavItem, PillButton, ResponsiveGrid, RoundedCard, ScrollableFrame, StatusPill, card, load_icon
 
 PROJECT_ROOT = get_application_root()
 SRC_DIR = PROJECT_ROOT / "src"
@@ -256,13 +256,18 @@ class FactuRiskApp:
         logo_path = ASSETS_DIR / "logo.png"
         if logo_path.exists():
             logo = Image.open(logo_path).convert("RGBA")
-            self.window_icons = [ImageTk.PhotoImage(logo.resize((size, size), Image.Resampling.LANCZOS)) for size in (256, 64, 32, 16)]
+            small_path = ASSETS_DIR / "logo_small.png"
+            small = Image.open(small_path).convert("RGBA") if small_path.exists() else logo
+            self.window_icons = [
+                ImageTk.PhotoImage(source.resize((size, size), Image.Resampling.LANCZOS))
+                for source, size in ((logo, 256), (logo, 64), (small, 32), (small, 16))
+            ]
             self.root.iconphoto(True, *self.window_icons)
 
     def load_icons(self) -> None:
         """Load navigation (light) and card (tinted tile) icons."""
 
-        names = [*PHASE_ORDER, "todo", "dashboard", "modelo", "recall", "f1", "pendientes", "riesgo_alto", "importe"]
+        names = [*PHASE_ORDER, "todo", "dashboard", "config", "modelo", "recall", "f1", "pendientes", "riesgo_alto", "importe"]
         for name in names:
             nav = load_icon(ASSETS_DIR / f"nav_{name}.png", 20)
             tile = load_icon(ASSETS_DIR / f"tile_{name}.png", 38)
@@ -270,7 +275,7 @@ class FactuRiskApp:
                 self.icons[f"{name}_nav"] = nav
             if tile:
                 self.icons[f"{name}_tile"] = tile
-        logo = load_icon(ASSETS_DIR / "logo.png", 40)
+        logo = load_icon(ASSETS_DIR / "logo_small.png", 40)
         if logo:
             self.icons["logo"] = logo
         logo_path = ASSETS_DIR / "logo.png"
@@ -298,6 +303,12 @@ class FactuRiskApp:
         self.dashboard_view = DashboardView(self.views, self.icons, go_to_pipeline=lambda: self.select_phase("todo"))
         self.dashboard_view.grid(row=0, column=0, sticky="nsew")
         self.dashboard_view.grid_remove()
+
+        from settings_view import SettingsView
+
+        self.settings_view = SettingsView(self.views, self.icons, on_dataset_changed=self.on_dataset_changed, on_sources_changed=self.refresh_source_pill)
+        self.settings_view.grid(row=0, column=0, sticky="nsew")
+        self.settings_view.grid_remove()
 
     def build_sidebar(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -331,6 +342,15 @@ class FactuRiskApp:
         item = NavItem(parent, "Dashboard de riesgo", self.icons.get("dashboard_nav"), command=self.show_dashboard)
         item.grid(row=row, column=0, sticky="ew")
         self.nav_items["dashboard"] = item
+        row += 1
+
+        section = ttk.Label(parent, text="SISTEMA", style="NavSection.TLabel", padding=(20, 16, 0, 4))
+        section.grid(row=row, column=0, sticky="ew")
+        self.nav_sections.append(section)
+        row += 1
+        item = NavItem(parent, "Configuración", self.icons.get("config_nav"), command=self.show_settings)
+        item.grid(row=row, column=0, sticky="ew")
+        self.nav_items["config"] = item
         row += 1
 
         parent.rowconfigure(row, weight=1)
@@ -426,7 +446,7 @@ class FactuRiskApp:
             text = ttk.Frame(inner, style="Card.TFrame")
             text.pack(side="left", fill="x", expand=True)
             ttk.Label(text, text=title, style="CardCaption.TLabel").pack(anchor="w")
-            ttk.Label(text, textvariable=self.metric_vars[key], style="CardValue.TLabel").pack(anchor="w")
+            FitLabel(text, textvariable=self.metric_vars[key], max_size=22, min_size=11).pack(anchor="w", fill="x")
             grid.add(box)
 
     def build_phase_cards(self, parent: ttk.Frame) -> None:
@@ -561,6 +581,7 @@ class FactuRiskApp:
     def select_phase(self, phase: str) -> None:
         self.selected_phase.set(phase)
         self.dashboard_view.grid_remove()
+        self.settings_view.grid_remove()
         self.ml_view.grid()
         for key, item in self.nav_items.items():
             item.set_selected(key == phase)
@@ -587,8 +608,32 @@ class FactuRiskApp:
         for key, item in self.nav_items.items():
             item.set_selected(key == "dashboard")
         self.ml_view.grid_remove()
+        self.settings_view.grid_remove()
         self.dashboard_view.grid()
         self.dashboard_view.refresh()
+
+    def show_settings(self) -> None:
+        for key, item in self.nav_items.items():
+            item.set_selected(key == "config")
+        self.ml_view.grid_remove()
+        self.dashboard_view.grid_remove()
+        self.settings_view.grid()
+
+    def refresh_source_pill(self) -> None:
+        self.source_pill.set(*self.describe_sunat_source())
+
+    def on_dataset_changed(self) -> None:
+        """A new dataset invalidates every previous phase result."""
+
+        self.completed_phases.clear()
+        for key in PHASE_ORDER:
+            self.set_phase_status(key, "Pendiente")
+        self.reset_metric_cards()
+        self.progress.configure(value=0)
+        self.status_text.set("Nuevo dataset: ejecuta el proceso completo")
+        self.log("Dataset activo cambiado. Ejecute el proceso completo para reentrenar con los nuevos datos.", "warn")
+        self.refresh_source_pill()
+        self.update_step_results_panel(self.selected_phase.get())
 
     def update_step_results_panel(self, phase: str) -> None:
         if phase == "todo":

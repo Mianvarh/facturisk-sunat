@@ -67,6 +67,7 @@ TILE_COLORS = {
     "pendientes": "#F97316",
     "riesgo_alto": "#EF4444",
     "importe": "#EAB308",
+    "config": "#64748B",
 }
 TILES_WITH_DARK_GLYPH = {"preparar", "importe"}
 
@@ -176,6 +177,33 @@ def configure_styles(style: Any) -> None:
     style.map("Table.Treeview.Heading", background=[("active", p["surface_alt"])])
     style.map("Table.Treeview", background=[("selected", p["primary_soft"])], foreground=[("selected", p["text"])])
     style.layout("Table.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+    style.configure(
+        "Field.TEntry",
+        fieldbackground=p["surface_alt"],
+        foreground=p["text"],
+        insertcolor=p["text"],
+        bordercolor=p["line"],
+        lightcolor=p["surface_alt"],
+        darkcolor=p["surface_alt"],
+        padding=(10, 8),
+        font=(FONT, 10),
+    )
+    style.map("Field.TEntry", bordercolor=[("focus", p["primary"])], lightcolor=[("focus", p["primary"])])
+    style.configure(
+        "Field.TSpinbox",
+        fieldbackground=p["surface_alt"],
+        foreground=p["text"],
+        insertcolor=p["text"],
+        bordercolor=p["line"],
+        lightcolor=p["surface_alt"],
+        darkcolor=p["surface_alt"],
+        arrowcolor=p["muted"],
+        background=p["surface_alt"],
+        padding=(8, 6),
+    )
+    style.configure("Card.TCheckbutton", background=p["surface"], foreground=p["text"], font=(FONT, 10), indicatorbackground=p["surface_alt"], indicatorforeground=p["on_primary"])
+    style.map("Card.TCheckbutton", background=[("active", p["surface"])], indicatorbackground=[("selected", p["primary"])])
+    style.configure("FieldLabel.TLabel", background=p["surface"], foreground=p["muted"], font=(FONT_MEDIUM, 9))
 
 
 def apply_chart_style() -> None:

@@ -164,3 +164,69 @@ def amount_vs_probability(pred: pd.DataFrame, sample: int = 4000, seed: int = 42
     if len(frame) > sample:
         frame = frame.sample(sample, random_state=seed)
     return frame
+
+
+NAME_COLUMNS = ["Razon_Social_Proveedor", "Razon_Social_SUNAT"]
+
+
+def supplier_names(pred: pd.DataFrame) -> pd.Series:
+    """Best available supplier name per row (imported file first, then SUNAT); empty when unknown."""
+
+    names = pd.Series("", index=pred.index, dtype="object")
+    for column in reversed(NAME_COLUMNS):
+        if column in pred.columns:
+            values = pred[column].astype("string").fillna("").str.strip()
+            names = names.where(values.eq(""), values.astype(object))
+    return names
+
+
+def has_names(pred: pd.DataFrame) -> bool:
+    return bool(supplier_names(pred).ne("").any())
+
+
+def filter_predictions(pred: pd.DataFrame, level: str = "Todos", text: str = "", tipo: str | None = None, ruc: str | None = None, factor: str | None = None) -> pd.DataFrame:
+    """Combine the dashboard filters: risk level, free text, voucher type, supplier and risk factor."""
+
+    result = pred
+    if level and level != "Todos":
+        result = result[result["Nivel_Riesgo"] == level]
+    if tipo:
+        result = result[result["Tipo_Comprobante"] == tipo]
+    if ruc:
+        result = result[result["RUC_Proveedor"].astype(str) == str(ruc)]
+    if factor:
+        pattern = factor.replace(" irregular", "")
+        result = result[result["Razones_Principales"].fillna("").str.contains(pattern, regex=False)]
+    text = (text or "").strip().lower()
+    if text:
+        haystack = (
+            result["ID_Comprobante"].astype(str)
+            + " "
+            + result["RUC_Proveedor"].astype(str)
+            + " "
+            + supplier_names(result).astype(str)
+        ).str.lower()
+        result = result[haystack.str.contains(text, regex=False)]
+    return result
+
+
+def padron_risk(pred: pd.DataFrame, columns: dict[str, str]) -> pd.DataFrame:
+    """High-risk share for suppliers inside vs outside each SUNAT registry (only registries with members)."""
+
+    rows = []
+    for column, label in columns.items():
+        if column not in pred.columns:
+            continue
+        inside = pred[pred[column] == 1]
+        outside = pred[pred[column] != 1]
+        if inside.empty:
+            continue
+        rows.append(
+            {
+                "padron": label,
+                "dentro": float((inside["Nivel_Riesgo"] == "Alto").mean() * 100),
+                "fuera": float((outside["Nivel_Riesgo"] == "Alto").mean() * 100) if not outside.empty else 0.0,
+                "comprobantes": len(inside),
+            }
+        )
+    return pd.DataFrame(rows)
