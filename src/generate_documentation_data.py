@@ -173,6 +173,10 @@ def collect_summary() -> dict[str, Any]:
     }
 
 
+# Columns that can hold names or addresses of companies or people; never shown as examples.
+PRIVATE_COLUMNS = {"Proveedor", "Ruc Proveedor", "Cliente", "Razon_Social_SUNAT", "Domicilio_Fiscal"}
+
+
 def table_columns(path: Path, sep: str, origin: str, model_features: list[str], forbidden: list[str]) -> str:
     """Build a Markdown dictionary table from a real CSV sample."""
 
@@ -184,7 +188,7 @@ def table_columns(path: Path, sep: str, origin: str, model_features: list[str], 
         "|---|---:|---|---|---|---|---|",
     ]
     for column in sample.columns:
-        if column in ("Proveedor", "Ruc Proveedor", "Cliente", "Razon_Social_SUNAT") and sample[column].dtype == "object":
+        if column in PRIVATE_COLUMNS:
             example_text = ""
         else:
             example = sample[column].dropna().astype(str).head(1)

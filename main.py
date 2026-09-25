@@ -63,12 +63,14 @@ def format_duration(seconds: float) -> str:
 def write_message(message: str, log_file) -> None:
     """Print and persist one pipeline message."""
 
-    console_encoding = sys.stdout.encoding or "utf-8"
-    safe_message = message.encode(console_encoding, errors="replace").decode(
-        console_encoding,
-        errors="replace",
-    )
-    print(safe_message)
+    # pythonw.exe (desktop shortcut) runs without a console: sys.stdout is None.
+    if sys.stdout is not None:
+        console_encoding = sys.stdout.encoding or "utf-8"
+        safe_message = message.encode(console_encoding, errors="replace").decode(
+            console_encoding,
+            errors="replace",
+        )
+        print(safe_message)
     log_file.write(message + "\n")
     log_file.flush()
 
