@@ -45,8 +45,10 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from feature_engineering import HISTORICAL_FEATURES
 from transformadores import RellenadorNAcategoricas
 from paths import ensure_directories, get_application_root
+from theme import apply_chart_style
 
 
+apply_chart_style()
 
 PROJECT_ROOT = get_application_root()
 DATASET_PATH = PROJECT_ROOT / "data" / "processed" / "dataset_modelo.csv"

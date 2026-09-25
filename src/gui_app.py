@@ -1,7 +1,8 @@
-"""Premium desktop interface for the FactuRisk SUNAT pipeline."""
+"""Desktop interface for the FactuRisk SUNAT pipeline: ML module and risk dashboard."""
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import queue
@@ -10,19 +11,20 @@ import subprocess
 import sys
 import threading
 import time
+import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import BooleanVar, StringVar, Tk, messagebox
-from tkinter import ttk
+from tkinter import BooleanVar, StringVar, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
 import pandas as pd
-from PIL import Image, ImageTk
+from PIL import ImageTk
 
 from paths import ensure_directories, get_application_root
-
+from theme import FONT_MONO, PALETTE, configure_styles, model_display_name
+from ui_widgets import NavItem, ResponsiveGrid, ScrollableFrame, card, load_icon
 
 PROJECT_ROOT = get_application_root()
 SRC_DIR = PROJECT_ROOT / "src"
@@ -48,6 +50,11 @@ PHASE_SCRIPTS = {
 
 PHASE_ORDER = ["inspect", "distribuido", "scraping", "mongodb", "preparar", "entrenar", "predecir", "documentar"]
 
+# Below this window width the sidebar collapses to icons and header actions wrap.
+COMPACT_WIDTH = 1180
+# Minimum content width to show phase cards and the detail panel side by side.
+WIDE_DETAIL_WIDTH = 1000
+
 
 @dataclass(frozen=True)
 class PhaseInfo:
@@ -57,6 +64,7 @@ class PhaseInfo:
     title: str
     subtitle: str
     detail: str
+    outcome: str
 
 
 PHASES = {
@@ -65,55 +73,61 @@ PHASES = {
         "Inspección inicial",
         "Valida estructura, fechas, RUC, nulos y duplicados.",
         "Lee el dataset histórico sin modificarlo y genera un reporte de calidad en outputs/inspeccion_dataset.txt.",
+        "Confirmar que el histórico esté listo para el análisis: estructura, tipos, RUC válidos, fechas, nulos y duplicados.",
     ),
     "distribuido": PhaseInfo(
         "distribuido",
         "Procesamiento distribuido",
-        "Ejecuta una lógica MapReduce local por bloques.",
+        "Lógica MapReduce local por bloques.",
         "Divide el histórico en bloques, resume por proveedor y consolida resultados para analítica del negocio.",
+        "Demostrar procesamiento por bloques: mapear datos por proveedor, agruparlos y consolidar indicadores.",
     ),
     "scraping": PhaseInfo(
         "scraping",
         "Scraping SUNAT",
         "Descarga o reutiliza el padrón reducido oficial.",
-        "Ubica automáticamente el ZIP vigente, valida su formato, lo descomprime y filtra los RUC del negocio.",
+        "Ubica el ZIP vigente del padrón reducido, valida su formato, lo descomprime y filtra los RUC del negocio.",
+        "Actualizar la información tributaria de los proveedores desde la fuente oficial, sin consultas individuales por RUC.",
     ),
     "mongodb": PhaseInfo(
         "mongodb",
-        "Carga en MongoDB Atlas",
-        "Actualiza proveedores SUNAT sin duplicar RUC.",
-        "Crea/verifica indice unico y usa upsert para mantener la coleccion proveedores_sunat.",
+        "Carga en MongoDB",
+        "Upsert de proveedores SUNAT por RUC.",
+        "Crea o verifica un índice único y usa upsert para mantener la colección proveedores_sunat. Sin configuración, se omite y se usa el respaldo local.",
+        "Dejar la foto tributaria actual en MongoDB, usando el RUC como clave única para evitar duplicados.",
     ),
     "preparar": PhaseInfo(
         "preparar",
         "Preparación de datasets",
-        "Une histórico, SUNAT y variables sin fuga.",
+        "Une histórico y SUNAT con variables sin fuga.",
         "Genera dataset_modelo.csv y dataset_pendientes.csv para entrenamiento y predicción.",
+        "Unir histórico y SUNAT, crear variables útiles y separar los comprobantes definitivos de los pendientes.",
     ),
     "entrenar": PhaseInfo(
         "entrenar",
         "Entrenamiento ML",
-        "Compara modelos, calibra y optimiza umbral.",
+        "Compara modelos, calibra y optimiza el umbral.",
         "Prioriza recall, F1 y PR-AUC de incidencias con validación temporal.",
+        "Comparar modelos, elegir el mejor, calibrar probabilidades y definir el umbral operativo.",
     ),
     "predecir": PhaseInfo(
         "predecir",
         "Predicción de pendientes",
-        "Clasifica comprobantes pendientes por nivel de riesgo.",
-        "Aplica el umbral operativo guardado y genera predicciones_pendientes.csv.",
+        "Clasifica los pendientes por nivel de riesgo.",
+        "Aplica el modelo y el umbral guardados y genera predicciones_pendientes.csv.",
+        "Estimar la probabilidad de incidencia de cada comprobante pendiente y clasificarlo por riesgo.",
     ),
     "documentar": PhaseInfo(
         "documentar",
-        "Documentación dinámica",
-        "Actualiza reportes, gráficos y resumen ejecutivo.",
-        "Consolida métricas, gráficos y reportes finales del proyecto.",
+        "Reportes y documentación",
+        "Actualiza reportes, gráficos y resumen.",
+        "Consolida métricas, gráficos y reportes finales del proyecto en docs/ y outputs/.",
+        "Consolidar resultados finales, gráficos y reportes para explicar lo logrado.",
     ),
 }
 
 STEP_RESULTS = {
-    "inspect": [
-        OUTPUTS_DIR / "inspeccion_dataset.txt",
-    ],
+    "inspect": [OUTPUTS_DIR / "inspeccion_dataset.txt"],
     "distribuido": [
         OUTPUTS_DIR / "reporte_procesamiento_distribuido.txt",
         OUTPUTS_DIR / "reporte_procesamiento_distribuido.json",
@@ -124,14 +138,10 @@ STEP_RESULTS = {
         PROCESSED_DIR / "proveedores_sunat.csv",
         PROCESSED_DIR / "ruc_no_encontrados.csv",
     ],
-    "mongodb": [
-        OUTPUTS_DIR / "pipeline.log",
-        PROCESSED_DIR / "proveedores_sunat.csv",
-    ],
+    "mongodb": [OUTPUTS_DIR / "pipeline.log"],
     "preparar": [
         OUTPUTS_DIR / "reporte_preparacion.json",
         OUTPUTS_DIR / "matriz_correlacion_pearson.png",
-        OUTPUTS_DIR / "correlacion_pearson_variables.csv",
         PROCESSED_DIR / "dataset_modelo.csv",
         PROCESSED_DIR / "dataset_pendientes.csv",
     ],
@@ -143,75 +153,58 @@ STEP_RESULTS = {
     ],
     "predecir": [
         PROCESSED_DIR / "predicciones_pendientes.csv",
-        OUTPUTS_DIR / "resultado_final_consola.txt",
         OUTPUTS_DIR / "16_distribucion_riesgo_pendientes.png",
     ],
-    "documentar": [
-        OUTPUTS_DIR / "resumen_proyecto.json",
-        OUTPUTS_DIR / "matriz_correlacion_pearson.png",
-        OUTPUTS_DIR / "reporte_modelo.txt",
-        OUTPUTS_DIR / "09_matriz_confusion_optimizada.png",
-        OUTPUTS_DIR / "06_precision_recall_curve.png",
-        OUTPUTS_DIR / "07_roc_curve.png",
-        OUTPUTS_DIR / "16_distribucion_riesgo_pendientes.png",
-    ],
+    "documentar": [OUTPUTS_DIR / "resumen_proyecto.json"],
 }
 
-STEP_OUTCOMES = {
-    "inspect": "Busca confirmar que el dataset histórico esté listo para el análisis: estructura, tipos, RUC válidos, fechas, nulos y duplicados.",
-    "distribuido": "Busca demostrar procesamiento por bloques: mapear datos por proveedor, agruparlos y consolidar indicadores de negocio.",
-    "scraping": "Busca actualizar la información tributaria de proveedores desde la fuente oficial SUNAT, sin consultas individuales por RUC.",
-    "mongodb": "Busca dejar la foto tributaria actual en MongoDB Atlas, usando RUC único para evitar duplicados.",
-    "preparar": "Busca unir histórico y SUNAT, crear variables útiles y separar datos definitivos de comprobantes pendientes.",
-    "entrenar": "Busca comparar modelos, elegir el mejor, calibrar probabilidades y definir el umbral operativo.",
-    "predecir": "Busca estimar la probabilidad de incidencia para comprobantes pendientes y clasificarlos por riesgo.",
-    "documentar": "Busca consolidar resultados finales, gráficos y reportes para explicar lo logrado en la demostración.",
+# Artifact that proves a phase already ran in a previous session (None: no artifact).
+PHASE_EVIDENCE: dict[str, Path | None] = {
+    "inspect": OUTPUTS_DIR / "inspeccion_dataset.txt",
+    "distribuido": OUTPUTS_DIR / "reporte_procesamiento_distribuido.json",
+    "scraping": None,
+    "mongodb": None,
+    "preparar": PROCESSED_DIR / "dataset_modelo.csv",
+    "entrenar": OUTPUTS_DIR / "metricas_modelo.json",
+    "predecir": PROCESSED_DIR / "predicciones_pendientes.csv",
+    "documentar": OUTPUTS_DIR / "resumen_proyecto.json",
 }
 
-GRAPH_SUMMARY = [
-    (
-        OUTPUTS_DIR / "matriz_correlacion_pearson.png",
-        "Matriz de calor Pearson: identifica las variables candidatas con mayor relacion lineal frente a la incidencia.",
-    ),
-    (
-        OUTPUTS_DIR / "09_matriz_confusion_optimizada.png",
-        "Matriz de confusión: resume aciertos, falsas alertas e incidencias no detectadas con el umbral optimizado.",
-    ),
-    (
-        OUTPUTS_DIR / "06_precision_recall_curve.png",
-        "Curva Precision-Recall: muestra el equilibrio entre detectar incidencias y generar alertas.",
-    ),
-    (
-        OUTPUTS_DIR / "07_roc_curve.png",
-        "Curva ROC: evalúa la capacidad general del modelo para separar aceptados e incidencias.",
-    ),
-    (
-        OUTPUTS_DIR / "04_comparacion_modelos_pr_auc.png",
-        "Comparación de modelos: muestra qué algoritmo obtuvo mejor desempeño bajo métricas relevantes.",
-    ),
-    (
-        OUTPUTS_DIR / "16_distribucion_riesgo_pendientes.png",
-        "Riesgo de pendientes: muestra cómo quedaron clasificados los comprobantes pendientes.",
-    ),
-]
+STATUS_STYLES = {
+    "Pendiente": "Pending.Status.TLabel",
+    "En ejecución": "Running.Status.TLabel",
+    "Completada": "Done.Status.TLabel",
+    "Fallida": "Failed.Status.TLabel",
+}
 
 
-class FactuRiskPipelineApp:
-    """Desktop orchestrator with a live console and guided project screens."""
+def enable_high_dpi() -> None:
+    """Render crisp text on scaled Windows displays."""
+
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except (AttributeError, OSError):
+            pass
+
+
+class FactuRiskApp:
+    """Desktop orchestrator with a live console, guided phases and a risk dashboard."""
 
     def __init__(self) -> None:
         ensure_directories()
-        self.root = Tk()
-        self.root.title("FactuRisk SUNAT | Plataforma de Predicción de Incidencias")
-        self.root.geometry("1440x860")
-        self.root.minsize(1280, 760)
-        self.root.configure(bg="#F5F8FC")
+        enable_high_dpi()
+        self.root = tk.Tk()
+        self.root.title("FactuRisk SUNAT · Predicción de incidencias en comprobantes")
+        self.root.geometry("1400x880")
+        self.root.minsize(760, 560)
+        self.root.configure(background=PALETTE["background"])
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         icon_path = ASSETS_DIR / "facturisk.ico"
         if icon_path.exists():
             try:
                 self.root.iconbitmap(str(icon_path))
-            except Exception:
+            except tk.TclError:
                 pass
 
         self.queue: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -219,416 +212,384 @@ class FactuRiskPipelineApp:
         self.current_process: subprocess.Popen[str] | None = None
         self.start_time: float | None = None
         self.running = False
+        self.compact: bool | None = None
+        self.detail_side: bool | None = None
 
         self.selected_phase = StringVar(value="todo")
-        self.status_text = StringVar(value="Listo para iniciar la demostración")
-        self.current_step = StringVar(value="Ejecute el Paso 01 o el proceso completo. Las fases posteriores se habilitan al completar la anterior.")
+        self.status_text = StringVar(value="Listo para iniciar")
         self.elapsed_text = StringVar(value="00:00")
         self.force_scraping = BooleanVar(value=False)
-
-        self.phase_cards: dict[str, ttk.Frame] = {}
         self.phase_status: dict[str, StringVar] = {key: StringVar(value="Pendiente") for key in PHASE_ORDER}
+        self.status_labels: dict[str, list[ttk.Label]] = {key: [] for key in PHASE_ORDER}
         self.metric_vars: dict[str, StringVar] = {}
         self.completed_phases: set[str] = set()
-        self.nav_buttons: dict[str, ttk.Button] = {}
+        self.nav_items: dict[str, NavItem] = {}
         self.icons: dict[str, ImageTk.PhotoImage] = {}
-        self.logo_image: ImageTk.PhotoImage | None = None
-        self.preview_image: ImageTk.PhotoImage | None = None
-        self.current_graph_index = 0
 
-        self.setup_styles()
+        configure_styles(ttk.Style(self.root))
         self.load_icons()
         self.build_layout()
-        self.reset_metric_cards()
-        self.update_phase_availability()
-        self.update_step_results_panel("todo")
+        self.restore_completed_phases()
+        self.select_phase("todo")
+        self.refresh_metrics()
+        self.root.bind("<Configure>", self.on_resize)
         self.root.after(120, self.process_queue)
         self.root.after(1000, self.tick)
 
-    def setup_styles(self) -> None:
-        """Configure corporate visual styles."""
-
-        self.colors = {
-            "navy": "#071D49",
-            "ink": "#102033",
-            "muted": "#64748B",
-            "blue": "#0067B1",
-            "cyan": "#00A6CE",
-            "green": "#13A538",
-            "lime": "#A6CE39",
-            "soft": "#F5F8FC",
-            "panel": "#FFFFFF",
-            "line": "#DDE7F0",
-            "warning": "#F59E0B",
-            "danger": "#D92D20",
-        }
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Root.TFrame", background=self.colors["soft"])
-        style.configure("Nav.TFrame", background=self.colors["navy"])
-        style.configure("Panel.TFrame", background=self.colors["panel"])
-        style.configure("Card.TFrame", background=self.colors["panel"], relief="flat")
-        style.configure("Title.TLabel", background=self.colors["soft"], foreground=self.colors["ink"], font=("Segoe UI Semibold", 22))
-        style.configure("Subtitle.TLabel", background=self.colors["soft"], foreground=self.colors["muted"], font=("Segoe UI", 10))
-        style.configure("PanelTitle.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("Segoe UI Semibold", 13))
-        style.configure("Body.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("Segoe UI", 9))
-        style.configure("Small.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("Segoe UI", 8))
-        style.configure("NavTitle.TLabel", background=self.colors["navy"], foreground="#FFFFFF", font=("Segoe UI Semibold", 16))
-        style.configure("NavText.TLabel", background=self.colors["navy"], foreground="#BFD5E8", font=("Segoe UI", 9))
-        style.configure("Status.TLabel", background=self.colors["panel"], foreground=self.colors["blue"], font=("Segoe UI Semibold", 10))
-        style.configure("Step.TButton", background="#0D2A5B", foreground="#FFFFFF", borderwidth=0, focusthickness=0, font=("Segoe UI Semibold", 9), padding=(10, 7), anchor="w")
-        style.map("Step.TButton", background=[("active", "#123B78"), ("disabled", "#19335F")], foreground=[("disabled", "#7E94B1")])
-        style.configure("Primary.TButton", background=self.colors["blue"], foreground="#FFFFFF", borderwidth=0, focusthickness=0, font=("Segoe UI Semibold", 10), padding=(16, 10))
-        style.map("Primary.TButton", background=[("active", "#004F8D"), ("disabled", "#A9B9C7")])
-        style.configure("Secondary.TButton", background="#EAF3FA", foreground=self.colors["blue"], borderwidth=0, focusthickness=0, font=("Segoe UI Semibold", 9), padding=(12, 8))
-        style.map("Secondary.TButton", background=[("active", "#D9EBF6")])
-        style.configure("Danger.TButton", background=self.colors["danger"], foreground="#FFFFFF", borderwidth=0, focusthickness=0, font=("Segoe UI Semibold", 9), padding=(12, 8))
-        style.configure("TCheckbutton", background=self.colors["panel"], foreground=self.colors["ink"], font=("Segoe UI", 9))
-        style.configure("Horizontal.TProgressbar", troughcolor="#EAF0F6", background=self.colors["cyan"], bordercolor="#EAF0F6", lightcolor=self.colors["cyan"], darkcolor=self.colors["cyan"])
+    # ------------------------------------------------------------------- setup
 
     def load_icons(self) -> None:
-        """Load local PNG icons for navigation and metric cards."""
+        """Load navigation (light) and card (tinted tile) icons."""
 
-        icon_files = {
-            "todo": "icon_todo.png",
-            "inspect": "icon_01_inspect.png",
-            "distribuido": "icon_02_mapreduce.png",
-            "scraping": "icon_03_sunat.png",
-            "mongodb": "icon_04_mongodb.png",
-            "preparar": "icon_05_prepare.png",
-            "entrenar": "icon_06_train.png",
-            "predecir": "icon_07_predict.png",
-            "documentar": "icon_08_docs.png",
-            "modelo": "metric_model.png",
-            "recall": "metric_recall.png",
-            "f1": "metric_f1.png",
-            "pendientes": "metric_pending.png",
-            "riesgo_alto": "metric_high.png",
-        }
-        for key, filename in icon_files.items():
-            path = ASSETS_DIR / filename
-            if not path.exists():
-                continue
-            try:
-                image = Image.open(path).convert("RGBA").resize((28, 28), Image.Resampling.LANCZOS)
-                self.icons[key] = ImageTk.PhotoImage(image)
-            except Exception:
-                pass
+        names = [*PHASE_ORDER, "todo", "dashboard", "modelo", "recall", "f1", "pendientes", "riesgo_alto", "importe"]
+        for name in names:
+            nav = load_icon(ASSETS_DIR / f"nav_{name}.png", 20)
+            tile = load_icon(ASSETS_DIR / f"tile_{name}.png", 38)
+            if nav:
+                self.icons[f"{name}_nav"] = nav
+            if tile:
+                self.icons[f"{name}_tile"] = tile
+        logo = load_icon(ASSETS_DIR / "logo.png", 40)
+        if logo:
+            self.icons["logo"] = logo
 
     def build_layout(self) -> None:
-        """Create all visible sections."""
-
         self.root.columnconfigure(1, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        nav = ttk.Frame(self.root, style="Nav.TFrame", width=318)
-        nav.grid(row=0, column=0, sticky="nsew")
-        nav.grid_propagate(False)
-        nav.columnconfigure(0, weight=1)
+        self.sidebar = ttk.Frame(self.root, style="Nav.TFrame")
+        self.sidebar.grid(row=0, column=0, sticky="nsw")
+        self.build_sidebar(self.sidebar)
 
-        self.build_nav(nav)
+        self.views = ttk.Frame(self.root, style="App.TFrame")
+        self.views.grid(row=0, column=1, sticky="nsew")
+        self.views.columnconfigure(0, weight=1)
+        self.views.rowconfigure(0, weight=1)
 
-        main = ttk.Frame(self.root, style="Root.TFrame")
-        main.grid(row=0, column=1, sticky="nsew")
-        main.columnconfigure(0, weight=1)
-        main.rowconfigure(2, weight=1)
-        main.rowconfigure(3, weight=1)
+        self.ml_view = ttk.Frame(self.views, style="App.TFrame")
+        self.ml_view.grid(row=0, column=0, sticky="nsew")
+        self.build_ml_view(self.ml_view)
 
-        self.build_header(main)
-        self.build_metric_strip(main)
-        self.build_phase_area(main)
-        self.build_console(main)
+        from dashboard import DashboardView
 
-    def build_nav(self, parent: ttk.Frame) -> None:
-        """Build the left navigation panel."""
+        self.dashboard_view = DashboardView(self.views, self.icons, go_to_pipeline=lambda: self.select_phase("todo"))
+        self.dashboard_view.grid(row=0, column=0, sticky="nsew")
+        self.dashboard_view.grid_remove()
 
-        logo_frame = ttk.Frame(parent, style="Nav.TFrame")
-        logo_frame.grid(row=0, column=0, sticky="ew", padx=24, pady=(22, 14))
-        logo_frame.columnconfigure(0, weight=1)
+    def build_sidebar(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        brand = ttk.Frame(parent, style="Nav.TFrame", padding=(16, 20, 16, 18))
+        brand.grid(row=0, column=0, sticky="ew")
+        if "logo" in self.icons:
+            ttk.Label(brand, image=self.icons["logo"], background=PALETTE["ink"]).grid(row=0, column=0, rowspan=2, sticky="w", padx=(2, 10))
+        self.brand_title = ttk.Label(brand, text="FactuRisk", style="Brand.TLabel")
+        self.brand_title.grid(row=0, column=1, sticky="sw")
+        self.brand_sub = ttk.Label(brand, text="SUNAT · Riesgo de comprobantes", style="BrandSub.TLabel")
+        self.brand_sub.grid(row=1, column=1, sticky="nw")
 
-        logo_path = ASSETS_DIR / "logo.png"
-        if logo_path.exists():
-            try:
-                image = Image.open(logo_path).convert("RGBA")
-                image.thumbnail((118, 54))
-                self.logo_image = ImageTk.PhotoImage(image)
-                ttk.Label(logo_frame, image=self.logo_image, background=self.colors["navy"]).grid(row=0, column=0, sticky="w")
-            except Exception:
-                ttk.Label(logo_frame, text="FactuRisk", style="NavTitle.TLabel").grid(row=0, column=0, sticky="w")
-        else:
-            ttk.Label(logo_frame, text="FactuRisk", style="NavTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.nav_sections: list[ttk.Label] = []
+        row = 1
+        section = ttk.Label(parent, text="MACHINE LEARNING", style="NavSection.TLabel", padding=(20, 6, 0, 4))
+        section.grid(row=row, column=0, sticky="ew")
+        self.nav_sections.append(section)
+        row += 1
+        labels = {"todo": "Proceso completo"}
+        labels.update({key: f"{index:02d} · {PHASES[key].title}" for index, key in enumerate(PHASE_ORDER, start=1)})
+        for key in ["todo", *PHASE_ORDER]:
+            item = NavItem(parent, labels[key], self.icons.get(f"{key}_nav"), command=lambda value=key: self.select_phase(value))
+            item.grid(row=row, column=0, sticky="ew")
+            self.nav_items[key] = item
+            row += 1
 
-        ttk.Label(logo_frame, text="ML SUNAT Control Tower", style="NavTitle.TLabel").grid(row=1, column=0, sticky="w", pady=(14, 2))
-        ttk.Label(logo_frame, text="Predicción preventiva de incidencias", style="NavText.TLabel").grid(row=2, column=0, sticky="w")
+        section = ttk.Label(parent, text="ANÁLISIS", style="NavSection.TLabel", padding=(20, 16, 0, 4))
+        section.grid(row=row, column=0, sticky="ew")
+        self.nav_sections.append(section)
+        row += 1
+        item = NavItem(parent, "Dashboard de riesgo", self.icons.get("dashboard_nav"), command=self.show_dashboard)
+        item.grid(row=row, column=0, sticky="ew")
+        self.nav_items["dashboard"] = item
+        row += 1
 
-        nav_items = [
-            ("todo", "Todo el proceso", "Ejecución guiada completa"),
-            ("inspect", "Paso 01 · Inspección", "Calidad inicial del CSV"),
-            ("distribuido", "Paso 02 · MapReduce", "Procesamiento por bloques"),
-            ("scraping", "Paso 03 · SUNAT", "Padrón reducido oficial"),
-            ("mongodb", "Paso 04 · MongoDB", "Carga NoSQL por RUC"),
-            ("preparar", "Paso 05 · Preparación", "Datasets y variables"),
-            ("entrenar", "Paso 06 · Entrenamiento", "Modelos y umbral"),
-            ("predecir", "Paso 07 · Predicción", "Pendientes por riesgo"),
-            ("documentar", "Paso 08 · Reportes", "Resultados finales"),
-        ]
-        items_frame = ttk.Frame(parent, style="Nav.TFrame")
-        items_frame.grid(row=1, column=0, sticky="ew", padx=18)
-        for idx, (key, label, desc) in enumerate(nav_items):
-            button = ttk.Button(
-                items_frame,
-                text=f"{label}\n{desc}",
-                image=self.icons.get(key),
-                compound="left",
-                style="Step.TButton",
-                command=lambda value=key: self.select_phase(value),
-            )
-            button.grid(row=idx, column=0, sticky="ew", pady=4)
-            self.nav_buttons[key] = button
+        parent.rowconfigure(row, weight=1)
+        self.nav_footer = ttk.Label(
+            parent,
+            text="Fuente externa: SUNAT\nNoSQL: MongoDB\nValidación temporal",
+            style="BrandSub.TLabel",
+            padding=(20, 0, 16, 18),
+            justify="left",
+        )
+        self.nav_footer.grid(row=row + 1, column=0, sticky="sew")
 
-        footer = ttk.Frame(parent, style="Nav.TFrame")
-        footer.grid(row=2, column=0, sticky="sew", padx=24, pady=24)
-        parent.rowconfigure(2, weight=1)
-        ttk.Label(footer, text="Fuente externa: SUNAT", style="NavText.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(footer, text="Base NoSQL: MongoDB Atlas", style="NavText.TLabel").grid(row=1, column=0, sticky="w")
-        ttk.Label(footer, text="Validación: temporal y reproducible", style="NavText.TLabel").grid(row=2, column=0, sticky="w")
+    def build_ml_view(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
 
-    def build_header(self, parent: ttk.Frame) -> None:
-        """Build top title and action buttons."""
+        self.header = ttk.Frame(parent, style="App.TFrame", padding=(28, 22, 28, 12))
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.header.columnconfigure(0, weight=1)
+        titles = ttk.Frame(self.header, style="App.TFrame")
+        titles.grid(row=0, column=0, sticky="ew")
+        ttk.Label(titles, text="Machine Learning", style="H1.TLabel").pack(anchor="w")
+        self.header_subtitle = ttk.Label(
+            titles,
+            text="Inspección, SUNAT, MongoDB, MapReduce, entrenamiento y predicción de comprobantes pendientes.",
+            style="Sub.TLabel",
+        )
+        self.header_subtitle.pack(anchor="w", pady=(2, 0))
+        titles.bind("<Configure>", lambda event: self.header_subtitle.configure(wraplength=max(event.width, 200)))
 
-        header = ttk.Frame(parent, style="Root.TFrame")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 12))
-        header.columnconfigure(0, weight=1)
+        self.actions = ttk.Frame(self.header, style="App.TFrame")
+        ttk.Checkbutton(self.actions, text="Forzar descarga SUNAT", variable=self.force_scraping).pack(side="left", padx=(0, 12))
+        self.todo_button = ttk.Button(self.actions, text="Ejecutar todo", style="Primary.TButton", command=lambda: self.run_phase_group("todo"))
+        self.todo_button.pack(side="left", padx=(0, 8))
+        self.stop_button = ttk.Button(self.actions, text="Detener", style="Danger.TButton", command=self.stop_process, state="disabled")
+        self.stop_button.pack(side="left", padx=(0, 8))
+        self.clean_button = ttk.Button(self.actions, text="Limpiar resultados", style="Secondary.TButton", command=self.clean_generated_data)
+        self.clean_button.pack(side="left")
+        self.actions.grid(row=0, column=1, sticky="e")
 
-        ttk.Label(header, text="Plataforma de Analítica Predictiva FactuRisk SUNAT", style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            header,
-            text="Inspección, SUNAT, MongoDB, procesamiento distribuido, Machine Learning y predicción de comprobantes pendientes.",
-            style="Subtitle.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        scroll = ScrollableFrame(parent)
+        scroll.grid(row=1, column=0, sticky="nsew")
+        body = ttk.Frame(scroll.body, style="App.TFrame", padding=(28, 0, 28, 24))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
 
-        actions = ttk.Frame(header, style="Root.TFrame")
-        actions.grid(row=0, column=1, rowspan=2, sticky="e")
-        ttk.Checkbutton(actions, text="Forzar scraping SUNAT", variable=self.force_scraping).grid(row=0, column=0, padx=(0, 10))
-        self.run_button = ttk.Button(actions, text="Ejecutar paso", style="Primary.TButton", command=self.run_selected)
-        self.run_button.grid(row=0, column=1, padx=4)
-        self.todo_button = ttk.Button(actions, text="Ejecutar todo", style="Primary.TButton", command=lambda: self.run_phase_group("todo"))
-        self.todo_button.grid(row=0, column=2, padx=4)
-        self.clear_all_button = ttk.Button(actions, text="Limpiar todo", style="Danger.TButton", command=self.clean_generated_data)
-        self.clear_all_button.grid(row=0, column=3, padx=4)
-        self.stop_button = ttk.Button(actions, text="Detener", style="Danger.TButton", command=self.stop_process)
-        self.stop_button.grid(row=0, column=4, padx=(4, 0))
+        self.build_metric_strip(body)
+        self.work_area = ttk.Frame(body, style="App.TFrame")
+        self.work_area.grid(row=1, column=0, sticky="ew")
+        self.build_phase_cards(self.work_area)
+        self.build_detail_panel(self.work_area)
+        self.layout_work_area(True)
+        self.build_console(body)
 
     def build_metric_strip(self, parent: ttk.Frame) -> None:
-        """Build top metric cards."""
-
-        strip = ttk.Frame(parent, style="Root.TFrame")
-        strip.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 14))
-        for col in range(5):
-            strip.columnconfigure(col, weight=1)
-
+        grid = ResponsiveGrid(parent, min_item_width=190, max_columns=5)
+        grid.grid(row=0, column=0, sticky="ew", pady=(4, 6))
         metrics = [
-            ("Modelo", "modelo", ""),
-            ("Recall incidencias", "recall", ""),
-            ("F1 incidencias", "f1", ""),
-            ("Pendientes evaluados", "pendientes", ""),
-            ("Riesgo alto", "riesgo_alto", ""),
+            ("Modelo", "modelo"),
+            ("Recall incidencias", "recall"),
+            ("F1 incidencias", "f1"),
+            ("Pendientes evaluados", "pendientes"),
+            ("Riesgo alto", "riesgo_alto"),
         ]
-        for col, (title, key, default) in enumerate(metrics):
-            self.metric_vars[key] = StringVar(value=default)
-            card = ttk.Frame(strip, style="Panel.TFrame", padding=(16, 12))
-            card.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 8, 0))
-            row = ttk.Frame(card, style="Panel.TFrame")
-            row.pack(anchor="w", fill="x")
-            if key in self.icons:
-                ttk.Label(row, image=self.icons[key], background=self.colors["panel"]).pack(side="left", padx=(0, 8))
-            text_box = ttk.Frame(row, style="Panel.TFrame")
-            text_box.pack(side="left", fill="x", expand=True)
-            ttk.Label(text_box, text=title, style="Small.TLabel").pack(anchor="w")
-            ttk.Label(text_box, textvariable=self.metric_vars[key], style="PanelTitle.TLabel").pack(anchor="w", pady=(4, 0))
+        for title, key in metrics:
+            self.metric_vars[key] = StringVar(value="—")
+            box = card(grid, padding=(14, 12))
+            inner = box.inner  # type: ignore[attr-defined]
+            if f"{key}_tile" in self.icons:
+                ttk.Label(inner, image=self.icons[f"{key}_tile"], style="CardBody.TLabel").pack(side="left", padx=(0, 12))
+            text = ttk.Frame(inner, style="Card.TFrame")
+            text.pack(side="left", fill="x", expand=True)
+            ttk.Label(text, text=title, style="CardCaption.TLabel").pack(anchor="w")
+            ttk.Label(text, textvariable=self.metric_vars[key], style="CardValue.TLabel").pack(anchor="w")
+            grid.add(box)
 
-    def build_phase_area(self, parent: ttk.Frame) -> None:
-        """Build phase cards and explanatory panel."""
-
-        area = ttk.Frame(parent, style="Root.TFrame")
-        area.grid(row=2, column=0, sticky="nsew", padx=28, pady=(0, 14))
-        area.columnconfigure(0, weight=2)
-        area.columnconfigure(1, weight=1)
-        area.rowconfigure(0, weight=1)
-
-        cards = ttk.Frame(area, style="Root.TFrame")
-        cards.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        for col in range(2):
-            cards.columnconfigure(col, weight=1)
-
-        for idx, key in enumerate(PHASE_ORDER):
+    def build_phase_cards(self, parent: ttk.Frame) -> None:
+        self.phase_grid = ResponsiveGrid(parent, min_item_width=250, max_columns=2)
+        self.phase_cards: dict[str, tk.Frame] = {}
+        for index, key in enumerate(PHASE_ORDER, start=1):
             info = PHASES[key]
-            card = ttk.Frame(cards, style="Panel.TFrame", padding=(14, 12))
-            card.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=6, pady=6)
-            card.columnconfigure(0, weight=1)
-            title_row = ttk.Frame(card, style="Panel.TFrame")
-            title_row.grid(row=0, column=0, sticky="ew")
-            if key in self.icons:
-                ttk.Label(title_row, image=self.icons[key], background=self.colors["panel"]).pack(side="left", padx=(0, 8))
-            ttk.Label(title_row, text=f"Paso {idx + 1:02d} · {info.title}", style="PanelTitle.TLabel").pack(side="left", anchor="w")
-            ttk.Label(card, text=info.subtitle, style="Body.TLabel", wraplength=390).grid(row=1, column=0, sticky="w", pady=(7, 6))
-            ttk.Label(card, textvariable=self.phase_status[key], style="Status.TLabel").grid(row=2, column=0, sticky="w")
-            card.bind("<Button-1>", lambda _event, phase=key: self.select_phase(phase))
-            self.phase_cards[key] = card
+            box = card(self.phase_grid, padding=(14, 12))
+            inner = box.inner  # type: ignore[attr-defined]
+            inner.columnconfigure(1, weight=1)
+            if f"{key}_tile" in self.icons:
+                ttk.Label(inner, image=self.icons[f"{key}_tile"], style="CardBody.TLabel").grid(row=0, column=0, rowspan=4, sticky="nw", padx=(0, 12))
+            ttk.Label(inner, text=f"Paso {index:02d}", style="CardCaption.TLabel").grid(row=0, column=1, sticky="w")
+            ttk.Label(inner, text=info.title, style="CardTitle.TLabel").grid(row=1, column=1, sticky="w")
+            subtitle = ttk.Label(inner, text=info.subtitle, style="CardBody.TLabel", justify="left")
+            subtitle.grid(row=2, column=1, sticky="w", pady=(2, 6))
+            status = ttk.Label(inner, textvariable=self.phase_status[key], style="Pending.Status.TLabel")
+            status.grid(row=3, column=1, sticky="w")
+            self.status_labels[key].append(status)
+            inner.bind("<Configure>", lambda event, label=subtitle: label.configure(wraplength=max(event.width - 96, 120)), add="+")
+            for widget in (box, inner, *inner.winfo_children()):
+                widget.bind("<Button-1>", lambda _event, phase=key: self.select_phase(phase), add="+")
+                widget.configure(cursor="hand2")
+            self.phase_cards[key] = box
+            self.phase_grid.add(box)
 
-        detail = ttk.Frame(area, style="Panel.TFrame", padding=(18, 16))
-        detail.grid(row=0, column=1, sticky="nsew")
-        detail.columnconfigure(0, weight=1)
-        ttk.Label(detail, text="Guía de ejecución", style="PanelTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(detail, textvariable=self.current_step, style="Body.TLabel", wraplength=380).grid(row=1, column=0, sticky="ew", pady=(8, 18))
-        ttk.Label(detail, text="Estado actual", style="Small.TLabel").grid(row=2, column=0, sticky="w")
-        ttk.Label(detail, textvariable=self.status_text, style="PanelTitle.TLabel", wraplength=380).grid(row=3, column=0, sticky="w", pady=(2, 14))
-        ttk.Label(detail, text="Tiempo transcurrido", style="Small.TLabel").grid(row=4, column=0, sticky="w")
-        ttk.Label(detail, textvariable=self.elapsed_text, style="PanelTitle.TLabel").grid(row=5, column=0, sticky="w", pady=(2, 18))
-        self.progress = ttk.Progressbar(detail, mode="determinate", maximum=100, style="Horizontal.TProgressbar")
-        self.progress.grid(row=6, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(detail, text="Resultado esperado", style="Small.TLabel").grid(row=7, column=0, sticky="w", pady=(4, 0))
-        self.result_text = StringVar(value="")
-        ttk.Label(detail, textvariable=self.result_text, style="Body.TLabel", wraplength=380).grid(row=8, column=0, sticky="ew", pady=(4, 10))
+    def build_detail_panel(self, parent: ttk.Frame) -> None:
+        self.detail = card(parent, padding=(18, 16))
+        inner = self.detail.inner  # type: ignore[attr-defined]
+        inner.columnconfigure(0, weight=1)
+        self.detail_caption = ttk.Label(inner, text="", style="CardCaption.TLabel")
+        self.detail_caption.grid(row=0, column=0, sticky="w")
+        self.detail_title = ttk.Label(inner, text="", style="CardTitle.TLabel")
+        self.detail_title.grid(row=1, column=0, sticky="w")
+        self.detail_text = ttk.Label(inner, text="", style="CardBody.TLabel", justify="left")
+        self.detail_text.grid(row=2, column=0, sticky="ew", pady=(6, 12))
 
-        self.preview_label = ttk.Label(detail, text="", style="Body.TLabel", background=self.colors["panel"])
-        self.preview_label.grid(row=9, column=0, sticky="ew", pady=(0, 8))
+        status_row = ttk.Frame(inner, style="Card.TFrame")
+        status_row.grid(row=3, column=0, sticky="ew")
+        status_row.columnconfigure(0, weight=1)
+        ttk.Label(status_row, text="Estado", style="CardCaption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(status_row, text="Tiempo", style="CardCaption.TLabel").grid(row=0, column=1, sticky="e")
+        self.status_label = ttk.Label(status_row, textvariable=self.status_text, style="Done.Status.TLabel")
+        self.status_label.grid(row=1, column=0, sticky="w")
+        ttk.Label(status_row, textvariable=self.elapsed_text, style="CardTitle.TLabel").grid(row=1, column=1, sticky="e")
+        self.progress = ttk.Progressbar(inner, mode="determinate", maximum=100, style="Brand.Horizontal.TProgressbar")
+        self.progress.grid(row=4, column=0, sticky="ew", pady=(10, 14))
 
-        graph_buttons = ttk.Frame(detail, style="Panel.TFrame")
-        graph_buttons.grid(row=10, column=0, sticky="ew", pady=(0, 8))
-        graph_buttons.columnconfigure(0, weight=1)
-        graph_buttons.columnconfigure(1, weight=1)
-        self.prev_graph_button = ttk.Button(graph_buttons, text="Gráfico anterior", style="Secondary.TButton", command=lambda: self.change_graph(-1))
-        self.prev_graph_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        self.next_graph_button = ttk.Button(graph_buttons, text="Gráfico siguiente", style="Secondary.TButton", command=lambda: self.change_graph(1))
-        self.next_graph_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ttk.Label(inner, text="Resultados", style="CardCaption.TLabel").grid(row=5, column=0, sticky="w")
+        self.result_text = ttk.Label(inner, text="", style="CardBody.TLabel", justify="left")
+        self.result_text.grid(row=6, column=0, sticky="ew", pady=(2, 14))
 
-        self.open_step_button = ttk.Button(detail, text="Abrir resultado del paso", style="Secondary.TButton", command=self.open_step_result)
-        self.open_step_button.grid(row=11, column=0, sticky="ew", pady=4)
-        self.open_predictions_button = ttk.Button(detail, text="Abrir predicciones", style="Secondary.TButton", command=self.open_predictions)
-        self.open_predictions_button.grid(row=12, column=0, sticky="ew", pady=4)
-        ttk.Button(detail, text="Actualizar resultados", style="Secondary.TButton", command=self.refresh_metrics).grid(row=13, column=0, sticky="ew", pady=4)
-        ttk.Button(detail, text="Limpiar todo", style="Danger.TButton", command=self.clean_generated_data).grid(row=14, column=0, sticky="ew", pady=4)
+        self.run_button = ttk.Button(inner, text="Ejecutar paso", style="Primary.TButton", command=self.run_selected)
+        self.run_button.grid(row=7, column=0, sticky="ew", pady=(0, 6))
+        self.open_step_button = ttk.Button(inner, text="Abrir resultado del paso", style="Secondary.TButton", command=self.open_step_result)
+        self.open_step_button.grid(row=8, column=0, sticky="ew", pady=(0, 6))
+        self.dashboard_button = ttk.Button(inner, text="Ver dashboard de riesgo", style="Secondary.TButton", command=self.show_dashboard)
+        self.dashboard_button.grid(row=9, column=0, sticky="ew")
+        inner.bind("<Configure>", self._wrap_detail)
+
+    def _wrap_detail(self, event: tk.Event) -> None:
+        width = max(event.width - 44, 160)
+        self.detail_text.configure(wraplength=width)
+        self.result_text.configure(wraplength=width)
 
     def build_console(self, parent: ttk.Frame) -> None:
-        """Build the bottom live console."""
-
-        console_panel = ttk.Frame(parent, style="Panel.TFrame", padding=(14, 10))
-        console_panel.grid(row=3, column=0, sticky="nsew", padx=28, pady=(0, 22))
-        console_panel.columnconfigure(0, weight=1)
-        console_panel.rowconfigure(1, weight=1)
-
-        top = ttk.Frame(console_panel, style="Panel.TFrame")
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        top.columnconfigure(0, weight=1)
-        ttk.Label(top, text="Consola de ejecución en tiempo real", style="PanelTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Button(top, text="Limpiar consola", style="Secondary.TButton", command=self.clear_console).grid(row=0, column=1, sticky="e")
-
+        box = card(parent, padding=(14, 10))
+        box.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        inner = box.inner  # type: ignore[attr-defined]
+        inner.columnconfigure(0, weight=1)
+        ttk.Label(inner, text="Consola en tiempo real", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(inner, text="Limpiar consola", style="Ghost.TButton", command=self.clear_console).grid(row=0, column=1, sticky="e")
         self.console = ScrolledText(
-            console_panel,
-            height=11,
-            bg="#07111F",
-            fg="#DBEAFE",
+            inner,
+            height=12,
+            background=PALETTE["console_bg"],
+            foreground=PALETTE["console_text"],
             insertbackground="#FFFFFF",
             relief="flat",
-            font=("Consolas", 9),
+            font=(FONT_MONO, 9),
             padx=12,
             pady=10,
+            wrap="word",
         )
-        self.console.grid(row=1, column=0, sticky="nsew")
-        self.console.tag_configure("ok", foreground="#8EE6A1")
-        self.console.tag_configure("warn", foreground="#FFD166")
-        self.console.tag_configure("err", foreground="#FF8A80")
-        self.console.tag_configure("phase", foreground="#7DD3FC")
+        self.console.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.console.tag_configure("ok", foreground="#7FD6A8")
+        self.console.tag_configure("warn", foreground="#F6C177")
+        self.console.tag_configure("err", foreground="#F28B82")
+        self.console.tag_configure("phase", foreground="#8CC8E8")
         self.log("Sistema listo. Ejecute el Paso 01 o el proceso completo.", "ok")
 
-    def select_phase(self, phase: str) -> None:
-        """Select a phase and update explanatory text."""
+    # -------------------------------------------------------------- responsive
 
-        self.selected_phase.set(phase)
-        if phase == "todo":
-            text = (
-                "Proceso completo: inspección, procesamiento distribuido, scraping SUNAT, MongoDB, "
-                "preparación, entrenamiento, predicción y documentación."
-            )
+    def on_resize(self, event: tk.Event) -> None:
+        if event.widget is not self.root:
+            return
+        compact = event.width < COMPACT_WIDTH
+        if compact != self.compact:
+            self.compact = compact
+            for item in self.nav_items.values():
+                item.set_collapsed(compact)
+            for widget in (self.brand_title, self.brand_sub, self.nav_footer, *self.nav_sections):
+                if compact:
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+            if compact:
+                self.actions.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+            else:
+                self.actions.grid(row=0, column=1, columnspan=1, sticky="e", pady=0)
+        sidebar_width = 58 if compact else 260
+        self.layout_work_area(event.width - sidebar_width - 70 >= WIDE_DETAIL_WIDTH)
+
+    def layout_work_area(self, side_by_side: bool) -> None:
+        if side_by_side == self.detail_side:
+            return
+        self.detail_side = side_by_side
+        if side_by_side:
+            self.work_area.columnconfigure(0, weight=3, uniform="work")
+            self.work_area.columnconfigure(1, weight=2, uniform="work")
+            self.phase_grid.grid(row=0, column=0, sticky="new", padx=(0, 12))
+            self.detail.grid(row=0, column=1, sticky="new", pady=(0, 12))
         else:
+            self.work_area.columnconfigure(0, weight=1, uniform="")
+            self.work_area.columnconfigure(1, weight=0, uniform="")
+            self.detail.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+            self.phase_grid.grid(row=1, column=0, sticky="ew", padx=0)
+
+    # ------------------------------------------------------------- navigation
+
+    def select_phase(self, phase: str) -> None:
+        self.selected_phase.set(phase)
+        self.dashboard_view.grid_remove()
+        self.ml_view.grid()
+        for key, item in self.nav_items.items():
+            item.set_selected(key == phase)
+        for key, box in self.phase_cards.items():
+            box.configure(background=PALETTE["primary"] if key == phase else PALETTE["line"])
+
+        if phase == "todo":
+            self.detail_caption.configure(text="PROCESO COMPLETO")
+            self.detail_title.configure(text="Ejecución guiada de las 8 fases")
+            self.detail_text.configure(
+                text="Inspección, procesamiento distribuido, scraping SUNAT, MongoDB, preparación, entrenamiento, predicción y reportes, en orden."
+            )
+            self.run_button.configure(text="Ejecutar proceso completo")
+        else:
+            index = PHASE_ORDER.index(phase) + 1
             info = PHASES[phase]
-            text = f"{info.title}: {info.detail}\n\nObjetivo: {STEP_OUTCOMES.get(phase, '')}"
-        self.current_step.set(text)
-        self.status_text.set(f"Seleccionado: {phase}")
+            self.detail_caption.configure(text=f"PASO {index:02d}")
+            self.detail_title.configure(text=info.title)
+            self.detail_text.configure(text=f"{info.detail}\n\nObjetivo: {info.outcome}")
+            self.run_button.configure(text="Ejecutar paso")
         self.update_step_results_panel(phase)
 
+    def show_dashboard(self) -> None:
+        for key, item in self.nav_items.items():
+            item.set_selected(key == "dashboard")
+        self.ml_view.grid_remove()
+        self.dashboard_view.grid()
+        self.dashboard_view.refresh()
+
     def update_step_results_panel(self, phase: str) -> None:
-        """Update contextual result text and graph preview for the selected phase."""
-
         if phase == "todo":
-            self.result_text.set("Ejecuta todos los pasos en orden. Los indicadores superiores aparecerán al completar entrenamiento y predicción.")
-            self.set_graph_controls(False)
-            self.preview_label.configure(image="", text="")
-            self.open_step_button.configure(text="Abrir carpeta de resultados", state="normal", command=self.open_outputs)
-            self.open_predictions_button.configure(state="disabled")
-            return
-
-        result_paths = STEP_RESULTS.get(phase, [])
-        existing = [path for path in result_paths if path.exists()]
-        if existing:
-            names = "\n".join(f"• {path.name}" for path in existing[:4])
-            self.result_text.set(f"Resultados disponibles para este paso:\n{names}")
-            self.open_step_button.configure(text="Abrir resultado del paso", state="normal", command=self.open_step_result)
-        else:
-            expected = "\n".join(f"• {path.name}" for path in result_paths[:4]) or "Este paso mostrará su avance principalmente en la consola."
-            self.result_text.set(f"Aún no hay resultados generados para este paso.\nSe espera:\n{expected}")
-            self.open_step_button.configure(text="Abrir carpeta de resultados", state="normal", command=self.open_outputs)
-
-        self.open_predictions_button.configure(state="normal" if phase == "predecir" and (PROCESSED_DIR / "predicciones_pendientes.csv").exists() else "disabled")
-
-        if phase == "documentar":
-            self.current_graph_index = 0
-            self.show_current_graph()
-            self.set_graph_controls(True)
-        else:
-            self.set_graph_controls(False)
-            self.preview_label.configure(image="", text="")
-
-    def set_graph_controls(self, enabled: bool) -> None:
-        """Enable or disable graph navigation buttons."""
-
-        state = "normal" if enabled else "disabled"
-        self.prev_graph_button.configure(state=state)
-        self.next_graph_button.configure(state=state)
-
-    def show_current_graph(self) -> None:
-        """Show one generated graph with a short interpretation."""
-
-        available = [(path, text) for path, text in GRAPH_SUMMARY if path.exists()]
-        if not available:
-            self.preview_label.configure(image="", text="Al completar el flujo se mostrarán aquí las gráficas principales del modelo.")
-            return
-        self.current_graph_index %= len(available)
-        path, explanation = available[self.current_graph_index]
-        try:
-            image = Image.open(path).convert("RGB")
-            image.thumbnail((360, 170), Image.Resampling.LANCZOS)
-            self.preview_image = ImageTk.PhotoImage(image)
-            self.preview_label.configure(
-                image=self.preview_image,
-                text=f"\n{explanation}",
-                compound="top",
-                wraplength=360,
-                justify="left",
+            done = sum(1 for key in PHASE_ORDER if key in self.completed_phases)
+            self.result_text.configure(
+                text=f"{done} de {len(PHASE_ORDER)} fases completadas con resultados guardados."
+                if done
+                else "Los indicadores superiores aparecerán al completar entrenamiento y predicción."
             )
-        except Exception as exc:
-            self.preview_label.configure(image="", text=f"No se pudo cargar el gráfico: {exc}")
+            self.open_step_button.configure(text="Abrir carpeta de resultados")
+        else:
+            result_paths = STEP_RESULTS.get(phase, [])
+            existing = [path for path in result_paths if path.exists()]
+            if existing:
+                self.result_text.configure(text="Disponibles:\n" + "\n".join(f"• {path.name}" for path in existing))
+                self.open_step_button.configure(text="Abrir resultado del paso")
+            else:
+                expected = "\n".join(f"• {path.name}" for path in result_paths) or "Este paso muestra su avance en la consola."
+                self.result_text.configure(text=f"Aún no hay resultados. Se generará:\n{expected}")
+                self.open_step_button.configure(text="Abrir carpeta de resultados")
+        self.dashboard_button.configure(state="normal" if (PROCESSED_DIR / "predicciones_pendientes.csv").exists() else "disabled")
+        allowed, _ = self.can_run_phase(phase)
+        self.run_button.configure(state="normal" if allowed and not self.running else "disabled")
 
-    def change_graph(self, direction: int) -> None:
-        """Move graph preview backward or forward."""
+    # -------------------------------------------------------------- execution
 
-        self.current_graph_index += direction
-        self.show_current_graph()
+    def restore_completed_phases(self) -> None:
+        """Mark consecutive phases whose artifacts already exist so the user can resume."""
+
+        for key in PHASE_ORDER:
+            evidence = PHASE_EVIDENCE[key]
+            if evidence is not None and not evidence.exists():
+                break
+            if evidence is None:
+                # Phases without their own artifact count as done once a later one is.
+                later = [PHASE_EVIDENCE[k] for k in PHASE_ORDER[PHASE_ORDER.index(key) + 1 :] if PHASE_EVIDENCE[k] is not None]
+                if not later or not later[0].exists():  # type: ignore[union-attr]
+                    break
+            self.completed_phases.add(key)
+            self.set_phase_status(key, "Completada")
+
+    def set_phase_status(self, phase: str, status: str) -> None:
+        self.phase_status[phase].set(status)
+        for label in self.status_labels[phase]:
+            label.configure(style=STATUS_STYLES.get(status, "Pending.Status.TLabel"))
 
     def can_run_phase(self, phase: str) -> tuple[bool, str]:
-        """Validate sequential execution before allowing one phase."""
-
         if phase == "todo":
             return True, ""
         index = PHASE_ORDER.index(phase)
@@ -637,47 +598,27 @@ class FactuRiskPipelineApp:
             return False, f"Antes debe completar: {', '.join(missing)}."
         return True, ""
 
-    def update_phase_availability(self) -> None:
-        """Enable only the next allowed phase to avoid broken executions."""
-
-        for key, button in self.nav_buttons.items():
-            if key == "todo":
-                button.configure(state="normal")
-                continue
-            allowed, _ = self.can_run_phase(key)
-            button.configure(state="normal" if allowed else "disabled")
-
     def build_command(self, phase: str) -> list[str]:
-        """Build a subprocess command for source and PyInstaller modes."""
-
         if getattr(sys, "frozen", False):
             command = [sys.executable, "--worker-phase", phase]
             if phase == "scraping" and self.force_scraping.get():
                 command.append("--force-scraping")
             return command
-        script = PHASE_SCRIPTS[phase]
-        command = [sys.executable, str(script)]
+        command = [sys.executable, str(PHASE_SCRIPTS[phase])]
         if phase == "scraping" and self.force_scraping.get():
             command.append("--force-download")
-        if phase == "resumen":
-            command.append("--no-gui")
         return command
 
     def run_selected(self) -> None:
-        """Run the currently selected phase or full flow."""
-
         self.run_phase_group(self.selected_phase.get())
 
     def run_phase_group(self, selected: str) -> None:
-        """Start a background worker for one phase or the full pipeline."""
-
         if self.running:
             messagebox.showinfo("Proceso en ejecución", "Ya hay una fase en ejecución.")
             return
         allowed, reason = self.can_run_phase(selected)
         if not allowed:
             messagebox.showwarning("Paso bloqueado", reason)
-            self.status_text.set(reason)
             self.log(f"Paso bloqueado: {reason}", "warn")
             return
         phases = PHASE_ORDER if selected == "todo" else [selected]
@@ -686,16 +627,14 @@ class FactuRiskPipelineApp:
         self.progress.configure(value=0)
         self.set_buttons_state(False)
         if selected == "todo":
-            for key in PHASE_ORDER:
-                self.phase_status[key].set("Pendiente")
             self.completed_phases.clear()
+            for key in PHASE_ORDER:
+                self.set_phase_status(key, "Pendiente")
             self.reset_metric_cards()
         self.worker_thread = threading.Thread(target=self.worker, args=(phases,), daemon=True)
         self.worker_thread.start()
 
     def worker(self, phases: list[str]) -> None:
-        """Run subprocess phases and stream their output to the UI queue."""
-
         total = len(phases)
         for index, phase in enumerate(phases, start=1):
             if not self.running:
@@ -703,12 +642,11 @@ class FactuRiskPipelineApp:
             self.queue.put(("phase_start", phase))
             command = self.build_command(phase)
             self.queue.put(("log", (f"INICIO DE FASE: {phase}", "phase")))
-            self.queue.put(("log", (f"Comando: {' '.join(command)}", "phase")))
             try:
                 self.current_process = subprocess.Popen(
                     command,
                     cwd=PROJECT_ROOT,
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg"},
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
@@ -716,6 +654,7 @@ class FactuRiskPipelineApp:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 assert self.current_process.stdout is not None
                 for line in self.current_process.stdout:
@@ -732,26 +671,22 @@ class FactuRiskPipelineApp:
                 self.queue.put(("done", False))
                 return
             self.queue.put(("phase_done", (phase, index, total)))
-
         self.queue.put(("done", True))
 
-    def tag_for_line(self, line: str) -> str:
-        """Select a console color tag based on text content."""
-
+    @staticmethod
+    def tag_for_line(line: str) -> str:
         lower = line.lower()
         if "fallida" in lower or "error" in lower or "traceback" in lower:
             return "err"
         if "warning" in lower or "advertencia" in lower:
             return "warn"
-        if "completada" in lower or "correctamente" in lower or "ok" in lower:
+        if "completada" in lower or "correctamente" in lower:
             return "ok"
         if "fase" in lower or "inicio" in lower:
             return "phase"
         return ""
 
     def process_queue(self) -> None:
-        """Process messages from the background worker."""
-
         try:
             while True:
                 event, payload = self.queue.get_nowait()
@@ -759,77 +694,64 @@ class FactuRiskPipelineApp:
                     message, tag = payload
                     self.log(message, tag)
                 elif event == "phase_start":
-                    self.phase_status[payload].set("En ejecución")
+                    self.set_phase_status(payload, "En ejecución")
                     self.status_text.set(f"Ejecutando: {PHASES[payload].title}")
-                    self.current_step.set(PHASES[payload].detail)
+                    self.status_label.configure(style="Running.Status.TLabel")
                 elif event == "phase_done":
                     phase, index, total = payload
                     self.completed_phases.add(phase)
-                    self.phase_status[phase].set("Completada")
-                    self.progress.configure(value=(index / total) * 100)
-                    self.update_phase_availability()
-                    if self.selected_phase.get() == phase:
-                        self.update_step_results_panel(phase)
+                    self.set_phase_status(phase, "Completada")
+                    self.progress.configure(value=index / total * 100)
                     self.log(f"FASE COMPLETADA: {phase}", "ok")
+                    if phase in {"entrenar", "predecir"}:
+                        self.refresh_metrics()
                 elif event == "phase_failed":
-                    self.phase_status[payload].set("Fallida")
-                    self.status_text.set(f"Fase fallida: {payload}")
+                    self.set_phase_status(payload, "Fallida")
+                    self.status_text.set(f"Fase fallida: {PHASES[payload].title}")
+                    self.status_label.configure(style="Failed.Status.TLabel")
                 elif event == "done":
-                    success = bool(payload)
                     self.running = False
                     self.set_buttons_state(True)
-                    if success:
+                    if payload:
                         self.progress.configure(value=100)
-                        if {"entrenar", "predecir"}.issubset(self.completed_phases):
-                            self.refresh_metrics()
+                        self.refresh_metrics()
                         self.status_text.set("Proceso completado correctamente")
-                        self.current_step.set("Los resultados fueron actualizados. Revise las métricas y archivos generados.")
+                        self.status_label.configure(style="Done.Status.TLabel")
                         self.log("PROCESO FINALIZADO CORRECTAMENTE", "ok")
                     else:
                         self.status_text.set("Proceso detenido por error")
                         self.log("PROCESO DETENIDO. Revise la consola.", "err")
+                    self.update_step_results_panel(self.selected_phase.get())
         except queue.Empty:
             pass
         self.root.after(120, self.process_queue)
 
     def tick(self) -> None:
-        """Update elapsed time while running."""
-
         if self.running and self.start_time is not None:
-            elapsed = int(time.perf_counter() - self.start_time)
-            minutes, seconds = divmod(elapsed, 60)
+            minutes, seconds = divmod(int(time.perf_counter() - self.start_time), 60)
             self.elapsed_text.set(f"{minutes:02d}:{seconds:02d}")
         self.root.after(1000, self.tick)
 
     def log(self, message: str, tag: str = "") -> None:
-        """Append a message to the live console."""
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
         self.console.configure(state="normal")
-        self.console.insert("end", f"[{timestamp}] {message}\n", tag)
+        self.console.insert("end", f"[{datetime.now():%H:%M:%S}] {message}\n", tag)
         self.console.see("end")
         self.console.configure(state="disabled")
 
     def clear_console(self) -> None:
-        """Clear the live console."""
-
         self.console.configure(state="normal")
         self.console.delete("1.0", "end")
         self.console.configure(state="disabled")
 
     def set_buttons_state(self, enabled: bool) -> None:
-        """Enable or disable action buttons."""
-
         state = "normal" if enabled else "disabled"
-        self.run_button.configure(state=state)
         self.todo_button.configure(state=state)
-        self.clear_all_button.configure(state=state)
-        if enabled:
-            self.update_phase_availability()
+        self.clean_button.configure(state=state)
+        self.stop_button.configure(state="disabled" if enabled else "normal")
+        allowed, _ = self.can_run_phase(self.selected_phase.get())
+        self.run_button.configure(state="normal" if enabled and allowed else "disabled")
 
     def stop_process(self) -> None:
-        """Terminate the active subprocess if one is running."""
-
         if self.current_process and self.current_process.poll() is None:
             self.current_process.terminate()
             try:
@@ -841,48 +763,72 @@ class FactuRiskPipelineApp:
         self.running = False
         self.set_buttons_state(True)
 
-    def reset_metric_cards(self) -> None:
-        """Clear result cards for a fresh demonstration."""
+    # ----------------------------------------------------------------- results
 
-        for key in ["modelo", "recall", "f1", "pendientes", "riesgo_alto"]:
-            if key in self.metric_vars:
-                self.metric_vars[key].set("")
+    def reset_metric_cards(self) -> None:
+        for var in self.metric_vars.values():
+            var.set("—")
+
+    def refresh_metrics(self) -> None:
+        metrics_path = OUTPUTS_DIR / "metricas_modelo.json"
+        predictions_path = PROCESSED_DIR / "predicciones_pendientes.csv"
+        if metrics_path.exists():
+            try:
+                metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+                test = metrics.get("metricas_prueba", {})
+                self.metric_vars["modelo"].set(model_display_name(metrics.get("mejor_modelo", "N/D")))
+                self.metric_vars["recall"].set(self.percent(test.get("recall_clase_1")))
+                self.metric_vars["f1"].set(self.percent(test.get("f1_clase_1")))
+            except (OSError, json.JSONDecodeError) as exc:
+                self.log(f"No se pudieron leer métricas: {exc}", "warn")
+        if predictions_path.exists():
+            try:
+                pred = pd.read_csv(predictions_path, encoding="utf-8-sig", usecols=["Nivel_Riesgo"])
+                self.metric_vars["pendientes"].set(f"{len(pred):,}")
+                self.metric_vars["riesgo_alto"].set(f"{int((pred['Nivel_Riesgo'] == 'Alto').sum()):,}")
+            except (OSError, ValueError) as exc:
+                self.log(f"No se pudieron leer predicciones: {exc}", "warn")
+
+    @staticmethod
+    def percent(value: Any) -> str:
+        try:
+            return f"{float(value) * 100:.2f}%"
+        except (TypeError, ValueError):
+            return "N/D"
 
     def clean_generated_data(self) -> None:
-        """Delete generated artifacts while preserving raw CSV and credentials."""
+        """Delete generated artifacts while preserving the input dataset and credentials."""
 
         if self.running:
             messagebox.showwarning("Proceso en ejecución", "Detenga el proceso antes de limpiar resultados.")
             return
-        answer = messagebox.askyesno(
-            "Limpiar todo",
+        if not messagebox.askyesno(
+            "Limpiar resultados",
             "Se eliminarán resultados, modelos, reportes, descargas SUNAT y datos procesados. "
-            "El dataset histórico y la configuración se conservarán. ¿Desea continuar?",
-        )
-        if not answer:
+            "El dataset de entrada y la configuración se conservarán. ¿Desea continuar?",
+        ):
             return
         try:
             skipped = self.safe_clean_generated_artifacts()
-            self.completed_phases.clear()
-            for key in PHASE_ORDER:
-                self.phase_status[key].set("Pendiente")
-            self.reset_metric_cards()
-            self.progress.configure(value=0)
-            self.elapsed_text.set("00:00")
-            self.status_text.set("Resultados limpiados. Inicie desde el Paso 01.")
-            self.current_step.set("Ejecute el Paso 01 o el proceso completo. Las métricas aparecerán al finalizar.")
-            self.clear_console()
-            self.log("Limpieza completada. Se conservaron el dataset histórico y la configuración.", "ok")
-            if skipped:
-                self.log("Algunos archivos estaban en uso y fueron omitidos: " + ", ".join(path.name for path in skipped), "warn")
-            self.update_phase_availability()
-            self.update_step_results_panel(self.selected_phase.get())
-        except Exception as exc:
+        except (OSError, RuntimeError) as exc:
             messagebox.showerror("Error al limpiar", str(exc))
             self.log(f"Error al limpiar resultados: {exc}", "err")
+            return
+        self.completed_phases.clear()
+        for key in PHASE_ORDER:
+            self.set_phase_status(key, "Pendiente")
+        self.reset_metric_cards()
+        self.progress.configure(value=0)
+        self.elapsed_text.set("00:00")
+        self.status_text.set("Resultados limpiados. Inicie desde el Paso 01.")
+        self.clear_console()
+        self.log("Limpieza completada. Se conservaron el dataset de entrada y la configuración.", "ok")
+        if skipped:
+            self.log("Archivos en uso omitidos: " + ", ".join(path.name for path in skipped), "warn")
+        self.update_step_results_panel(self.selected_phase.get())
 
     def safe_clean_generated_artifacts(self) -> list[Path]:
-        """Safely remove generated contents inside known project folders."""
+        """Remove generated contents inside known project folders only."""
 
         root = PROJECT_ROOT.resolve()
         skipped: list[Path] = []
@@ -897,7 +843,7 @@ class FactuRiskPipelineApp:
         for folder in folders:
             folder.mkdir(parents=True, exist_ok=True)
             resolved = folder.resolve()
-            if root not in resolved.parents and resolved != root:
+            if root not in resolved.parents:
                 raise RuntimeError(f"Ruta fuera del proyecto: {resolved}")
             for item in resolved.iterdir():
                 removed = False
@@ -918,88 +864,40 @@ class FactuRiskPipelineApp:
                     skipped.append(item)
         return skipped
 
-    def refresh_metrics(self) -> None:
-        """Refresh top cards from generated artifacts."""
-
-        metrics_path = OUTPUTS_DIR / "metricas_modelo.json"
-        predictions_path = PROCESSED_DIR / "predicciones_pendientes.csv"
-        if metrics_path.exists():
-            try:
-                metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-                test = metrics.get("metricas_prueba", {})
-                self.metric_vars["modelo"].set(str(metrics.get("mejor_modelo", "N/D"))[:24])
-                self.metric_vars["recall"].set(self.percent(test.get("recall_clase_1")))
-                self.metric_vars["f1"].set(self.percent(test.get("f1_clase_1")))
-            except Exception as exc:
-                self.log(f"No se pudieron leer métricas: {exc}", "warn")
-        if predictions_path.exists():
-            try:
-                pred = pd.read_csv(predictions_path, sep=",", encoding="utf-8-sig", usecols=lambda c: c in {"Nivel_Riesgo"}, low_memory=False)
-                self.metric_vars["pendientes"].set(f"{len(pred):,}")
-                high = int((pred["Nivel_Riesgo"] == "Alto").sum()) if "Nivel_Riesgo" in pred.columns else 0
-                self.metric_vars["riesgo_alto"].set(f"{high:,}")
-            except Exception as exc:
-                self.log(f"No se pudieron leer predicciones: {exc}", "warn")
-
     @staticmethod
-    def percent(value: Any) -> str:
-        """Format decimal as a percent card."""
-
-        try:
-            return f"{float(value) * 100:.2f}%"
-        except (TypeError, ValueError):
-            return "N/D"
-
-    def open_outputs(self) -> None:
-        """Open outputs directory."""
-
-        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-        os.startfile(OUTPUTS_DIR)
-
-    def open_predictions(self) -> None:
-        """Open predictions CSV if available."""
-
-        path = PROCESSED_DIR / "predicciones_pendientes.csv"
-        if path.exists():
+    def open_path(path: Path) -> None:
+        if sys.platform == "win32":
             os.startfile(path)
         else:
-            messagebox.showwarning("Archivo no encontrado", f"No existe: {path}")
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+
+    def open_outputs(self) -> None:
+        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.open_path(OUTPUTS_DIR)
 
     def open_step_result(self) -> None:
-        """Open the first available artifact that belongs to the selected step."""
-
         phase = self.selected_phase.get()
-        if phase == "todo":
-            self.open_outputs()
-            return
-        result_paths = STEP_RESULTS.get(phase, [])
-        existing = [path for path in result_paths if path.exists()]
+        existing = [path for path in STEP_RESULTS.get(phase, []) if path.exists()]
         if existing:
-            os.startfile(existing[0])
-            return
-        self.open_outputs()
+            self.open_path(existing[0])
+        else:
+            self.open_outputs()
 
     def close(self) -> None:
-        """Close the app safely."""
-
         if self.running:
-            answer = messagebox.askyesno("Proceso en ejecución", "Hay un proceso en ejecución. ¿Desea detenerlo y cerrar?")
-            if not answer:
+            if not messagebox.askyesno("Proceso en ejecución", "Hay un proceso en ejecución. ¿Desea detenerlo y cerrar?"):
                 return
             self.stop_process()
         self.root.destroy()
 
     def run(self) -> None:
-        """Start the Tkinter event loop."""
-
         self.root.mainloop()
 
 
 def lanzar_gui() -> None:
-    """Launch the premium graphical interface."""
+    """Launch the graphical interface."""
 
-    app = FactuRiskPipelineApp()
-    app.run()
+    FactuRiskApp().run()
 
 
 if __name__ == "__main__":

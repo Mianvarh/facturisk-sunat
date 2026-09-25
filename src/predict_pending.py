@@ -11,7 +11,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import ensure_directories, get_application_root
+from theme import apply_chart_style
 
+apply_chart_style()
 
 PROJECT_ROOT = get_application_root()
 MODEL_PATH = PROJECT_ROOT / "data" / "models" / "modelo_incidencias.joblib"

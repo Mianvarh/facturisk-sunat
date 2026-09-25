@@ -22,8 +22,10 @@ from pymongo.errors import PyMongoError
 from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, leer_comprobantes, normalizar_ruc
 from feature_engineering import HISTORICAL_FEATURES, crear_variables_historicas_sin_fuga
 from paths import ensure_directories, get_application_root
+from theme import apply_chart_style
 
 
+apply_chart_style()
 
 PROJECT_ROOT = get_application_root()
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
