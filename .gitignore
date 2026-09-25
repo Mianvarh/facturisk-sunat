@@ -1,0 +1,29 @@
+# Secrets
+.env
+config/configuracion.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated pipeline data (the public inputs in data/raw/*.parquet are tracked)
+data/raw/sunat/
+data/processed/
+data/models/
+outputs/
+logs/
+catboost_info/
+
+# Build artifacts
+build/
+dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+CONTEXTO_COMPLETO_PARA_IA.md

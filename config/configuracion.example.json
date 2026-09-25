@@ -1,0 +1,8 @@
+{
+  "modo": "completo",
+  "mongodb_uri": "",
+  "mongodb_database": "facturisk",
+  "mongodb_collection": "proveedores_sunat",
+  "usar_mongodb": true,
+  "permitir_scraping": true
+}

@@ -1,0 +1,26 @@
+# FactuRisk SUNAT - runtime dependencies
+# Python 3.11
+# Install with: pip install -r requirements.txt
+#
+# Lower bounds are ">= major.minor" of the versions used to train and save the
+# bundled models, so newer patch/minor releases are accepted.
+# scikit-learn is pinned exactly: the serialized pipelines in data/models/ are
+# version-sensitive and a different major/minor may fail to unpickle.
+#
+# Optional extra models (XGBoost, LightGBM, CatBoost, SHAP) live in
+# requirements-optional.txt and are NOT required to run the pipeline.
+
+pandas>=2.3
+numpy>=2.1
+pyarrow>=25.0
+scikit-learn==1.7.2
+joblib>=1.5
+matplotlib>=3.10
+seaborn>=0.13
+pymongo>=4.17
+python-dotenv>=1.2
+requests>=2.34
+beautifulsoup4>=4.12
+charset-normalizer>=3.4
+Pillow>=11.3
+certifi>=2025.7

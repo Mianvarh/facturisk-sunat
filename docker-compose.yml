@@ -1,0 +1,18 @@
+# Local MongoDB so the full pipeline runs without a MongoDB Atlas account.
+# Start it with: docker compose up -d
+services:
+  mongodb:
+    image: mongo:7
+    container_name: facturisk-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodb_data:

@@ -1,0 +1,15 @@
+# FactuRisk SUNAT - optional dependencies
+#
+# These add extra model families and explainability reports (XGBoost, LightGBM
+# and CatBoost candidates in the model comparison, plus SHAP feature
+# explanations). The training pipeline detects each one at runtime and the
+# project works without any of them installed: missing models are skipped and
+# the remaining candidates still train, evaluate and report metrics.
+#
+# Install with: pip install -r requirements-optional.txt
+# (they are also reported by the preflight check and by the training summary)
+
+xgboost>=3.2
+lightgbm>=4.7
+catboost>=1.2
+shap>=0.51
