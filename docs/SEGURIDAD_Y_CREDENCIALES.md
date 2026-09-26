@@ -1,7 +1,7 @@
 # Seguridad y credenciales
 
-La versión privada puede incluir una cuenta MongoDB de demostración en `config/configuracion.json`. Esa cuenta no debe ser administradora y debe limitarse a la base `facturisk`.
-
-La contraseña no debe imprimirse en consola, logs, reportes ni documentación. Las credenciales no deben compartirse públicamente. Después de la prueba se recomienda cambiar o eliminar el usuario.
-
-MongoDB Atlas puede requerir autorización de IP. Permitir `0.0.0.0/0` facilita pruebas, pero implica riesgo; es preferible una lista temporal y limitada.
+- Las credenciales de MongoDB se guardan localmente en `config/configuracion.json` o `.env`; ambos están excluidos de Git.
+- La URI se muestra enmascarada en la aplicación y nunca se imprime en consola, logs ni reportes.
+- Use un usuario de MongoDB con permisos solo sobre la base del proyecto.
+- En MongoDB Atlas, autorice solo las IP necesarias en Network Access.
+- Los datos importados (`data/raw/local/`) y los resultados (`outputs/`, `data/processed/`) no se versionan, porque pueden contener razones sociales y domicilios.

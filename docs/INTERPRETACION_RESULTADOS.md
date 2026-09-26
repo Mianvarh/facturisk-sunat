@@ -30,5 +30,5 @@ Si hay pocas incidencias, un modelo puede acertar muchos aceptados y aun así fa
 ## Gráficos
 La matriz de calor Pearson muestra la relacion lineal entre variables candidatas y la incidencia. La matriz de confusion muestra errores y aciertos con el umbral optimizado. La curva Precision-Recall muestra el intercambio entre detectar incidencias y generar alertas. La comparacion de modelos resume el rendimiento interno. El aporte SUNAT permite comparar experimentos con y sin variables tributarias.
 
-## Conclusión honesta
+## Conclusión
 La confiabilidad actual es Limitada. El modelo puede ayudar a priorizar revisiones, pero no debe rechazar comprobantes automáticamente cuando sus métricas y falsas alertas no sean suficientes.

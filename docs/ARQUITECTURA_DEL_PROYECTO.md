@@ -12,7 +12,7 @@ flowchart TD
   G --> H["Entrenamiento temporal"]
   H --> I["Optimización de umbral"]
   I --> J["Predicción pendientes"]
-  J --> K["Reportes y ventana final"]
+  J --> K["Reportes y dashboard"]
 ```
 
 ## Componentes

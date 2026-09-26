@@ -8,8 +8,6 @@
 - Columnas faltantes: verificar el esquema de `data/raw/comprobantes.parquet`.
 - Archivo bloqueado por Excel: cerrar Excel y volver a ejecutar.
 - Modelo no encontrado: ejecutar entrenamiento o restaurar `data/models/modelo_incidencias.joblib`.
-- Error de Pillow: reinstalar dependencias o recompilar portable.
-- Ventana gráfica no abre: usar la salida de consola y revisar logs.
 - Antivirus o SmartScreen bloquea el EXE: descomprimir en carpeta confiable y permitir ejecución.
 - Rutas con espacios o tildes: el proyecto usa rutas portables, pero evite mover solo el EXE.
 - Permisos de escritura: ejecutar desde una carpeta donde el usuario pueda escribir.

@@ -1,37 +1,29 @@
 # Manual de usuario
 
-## Uso básico
-1. Clone o descargue el repositorio.
-2. Instale los requisitos siguiendo el manual de instalación.
-3. Ejecute `python main.py` para la consola o `python main.py gui` para la interfaz gráfica.
-4. Mantenga conexión a internet para SUNAT y MongoDB.
+## Inicio
+Ejecute `python main.py gui` para abrir la aplicación o `python main.py` para el menú de consola. En Windows, `python scripts/crear_acceso_directo.py` crea un acceso directo en el escritorio.
 
-## Opciones del menú
-1. Inspeccionar datos: revisa filas, columnas, fechas, nulos y duplicados.
-2. Procesamiento distribuido: resume el historico por chunks con logica MapReduce.
-3. Ejecutar scraping SUNAT: descarga o reutiliza el padrón reducido del día.
-4. Cargar MongoDB: actualiza proveedores en Atlas sin duplicarlos.
-5. Preparar datos y crear variables: integra histórico con SUNAT y crea datasets.
-6. Entrenar, optimizar umbral y calibrar: evalúa modelos y selecciona el mejor.
-7. Predecir comprobantes pendientes: genera probabilidades de incidencia.
-8. Mostrar gráficos y resultados: abre el resumen visual final.
-9. Ejecutar proceso completo: ejecuta todo el flujo.
+## Configuración
+Desde **Configuración** puede:
+- Importar un historial propio en CSV o Excel, o volver al dataset de demostración.
+- Cambiar la fuente del padrón SUNAT (página, URL directa del ZIP o archivo local) y elegir padrones adicionales.
+- Guardar y probar la conexión a MongoDB.
 
-## Qué son los chunks
-Los chunks son bloques de lectura. Se usan para procesar archivos grandes sin cargar todo en memoria.
+## Fases
+1. Inspeccionar datos: filas, columnas, fechas, nulos y duplicados.
+2. Procesamiento distribuido: resumen por proveedor en bloques.
+3. Scraping SUNAT: descarga o reutiliza una descarga reciente del padrón.
+4. Cargar MongoDB: actualiza los proveedores sin duplicarlos.
+5. Preparar datos: integra histórico y SUNAT y crea variables.
+6. Entrenar: compara modelos, calibra y define el umbral.
+7. Predecir: calcula la probabilidad de incidencia de los pendientes.
+8. Reportes: actualiza métricas, gráficos y documentación.
+
+## Dashboard de riesgo
+Muestra indicadores, gráficos interactivos y la tabla de comprobantes prioritarios. Un clic en un gráfico filtra la tabla y un doble clic en una fila abre la ficha del comprobante. El botón **Ocultar nombres** enmascara razones sociales y domicilios.
 
 ## Tiempos aproximados
-Inspección y predicción suelen tardar segundos. Scraping, MongoDB, preparación y entrenamiento pueden tardar varios minutos según internet, equipo y tamaño de datos.
-
-## Proceso recomendado para la demostración
-1. Inspeccionar datos.
-2. Ejecutar procesamiento distribuido.
-3. Ejecutar scraping SUNAT.
-4. Cargar MongoDB.
-5. Preparar datos.
-6. Entrenar modelos, optimizar umbral y calibrar.
-7. Predecir pendientes.
-8. Mostrar gráficos y resultados.
+La inspección y la predicción tardan segundos; el scraping, la preparación y el entrenamiento pueden tardar varios minutos.
 
 ## Problemas externos
-Si SUNAT no responde, use la descarga previa. Si MongoDB no conecta, puede que la IP no esté autorizada en Atlas. El programa no muestra credenciales.
+Si SUNAT no responde, se reutiliza la última descarga válida. Si MongoDB no conecta, el pipeline usa el respaldo local.

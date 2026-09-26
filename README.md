@@ -1,179 +1,168 @@
 <p align="center">
-  <img src="assets/logo.png" alt="FactuRisk SUNAT logo" width="96">
+  <img src="assets/logo.png" alt="FactuRisk SUNAT" width="96">
 </p>
 
 <h1 align="center">FactuRisk SUNAT</h1>
 
 <p align="center">
-  <b>Machine learning pipeline that prioritizes the review of pending electronic invoices in Peru,<br>
-  enriching invoice history with the official SUNAT taxpayer registry.</b>
+  Risk scoring for pending electronic invoices in Peru, combining invoice history with the SUNAT taxpayer registry.
 </p>
 
 <p align="center">
   <a href="https://github.com/Mianvarh/facturisk-sunat/actions/workflows/ci.yml"><img src="https://github.com/Mianvarh/facturisk-sunat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/scikit--learn-1.7-F7931E?logo=scikitlearn&logoColor=white" alt="scikit-learn">
-  <img src="https://img.shields.io/badge/MongoDB-optional-47A248?logo=mongodb&logoColor=white" alt="MongoDB">
-  <img src="https://img.shields.io/badge/license-MIT-0E7C66" alt="MIT License">
+  <img src="https://img.shields.io/badge/license-MIT-7C5CFF" alt="MIT License">
 </p>
 
 <p align="center">
-  <img src="docs/images/dashboard.png" alt="FactuRisk risk dashboard" width="90%">
+  <img src="docs/images/dashboard.png" alt="Risk dashboard" width="90%">
 </p>
 
-## The problem
+## Overview
 
-Companies that process electronic invoices receive thousands of documents that end up **accepted**, **observed** or **rejected**. Reviewing every pending invoice with the same priority wastes time. FactuRisk estimates the probability that a pending invoice ends with an incident, so reviewers can start with the riskiest ones.
+Electronic invoices sent to SUNAT end up accepted, observed or rejected. When there are thousands of pending invoices, reviewing all of them with the same priority is slow. FactuRisk estimates how likely each pending invoice is to end with an incident, so the review can start with the riskiest ones. It is meant to prioritize manual review, not to reject invoices automatically.
 
-> The model is a **prioritization aid**, not an automatic rejection system.
+The pipeline:
 
-## What it does
+1. Checks the quality of the invoice history (150,000 records): types, dates, RUC format, nulls and duplicates.
+2. Summarizes the history per supplier in chunks, following a map / shuffle / reduce structure.
+3. Downloads the SUNAT reduced registry (~400 MB ZIP), detects its encoding and delimiter, and streams it in chunks to keep only the suppliers in the dataset. Other SUNAT registries (retention agents, good taxpayers, perception agents) can be added as 0/1 features.
+4. Stores the SUNAT data in MongoDB with upserts on a unique RUC index. If MongoDB is not available, it falls back to a local copy.
+5. Builds supplier-history features (previous incidents, 30/90-day windows, deviation from the usual amount) using only earlier invoices.
+6. Compares seven models with and without SUNAT features, using temporal validation, probability calibration and a threshold chosen for recall.
+7. Scores the pending invoices, assigns a low / medium / high risk level and lists the main factors behind each score.
+8. Generates reports and charts, and shows the results in a desktop app.
 
-1. **Inspects** 150,000 historical invoices: types, dates, RUC validity, nulls and duplicates.
-2. **Processes the history MapReduce-style** in chunks (map → shuffle by RUC → reduce), mirroring how the job would run on Spark.
-3. **Scrapes the official SUNAT reduced registry** (a ~400 MB ZIP), detecting encoding and delimiter automatically and streaming it in chunks to keep only the suppliers in the dataset. Optional extra registries (retention agents, good taxpayers, perception agents) are added as 0/1 features.
-4. **Loads the tax snapshot into MongoDB** with idempotent upserts and a unique RUC index, with a local backup when MongoDB is not available.
-5. **Builds leakage-safe features**: supplier history (previous incidents, 30/90-day windows, amount deviation) computed only from earlier invoices.
-6. **Trains and compares 7 models** (Logistic Regression, Random Forest, HistGradientBoosting, XGBoost, LightGBM, CatBoost, plus a baseline) **with and without SUNAT features**, using temporal validation, probability calibration and a threshold tuned for minimum recall.
-7. **Predicts pending invoices**, assigns Low/Medium/High risk and explains the main factors of each prediction.
-8. **Reports** metrics, charts and documentation, and shows everything in a **desktop app with an interactive risk dashboard**.
+## Desktop app
 
-### Desktop app features
-
-- **Bring your own data:** import a CSV or Excel history; delimiter, encoding and columns are detected automatically, even when headers are swapped (the RUC column is found by its content). Imported data stays local.
-- **Configurable external sources:** change the SUNAT registry page, use a direct ZIP link or an already downloaded file, and choose which extra SUNAT registries become model features.
-- **MongoDB from the panel:** enter the connection (Atlas or local), test it and save it locally; it takes precedence over `.env` and is never committed.
-- **Interactive dashboard:** tooltips on every chart, click a risk level, voucher type, supplier or risk factor to filter the priority table, free-text search, CSV export and a full detail sheet per invoice. With local data it shows company names, fiscal addresses and registry flags; a *hide names* switch masks them for screenshots.
+- Import your own history from CSV or Excel. The delimiter, encoding and columns are detected automatically; the RUC column is identified by its content, so swapped headers still work.
+- Change where the SUNAT data comes from (registry page, direct ZIP link or a local file) and choose which extra registries to use.
+- Configure and test the MongoDB connection. Settings and imported data stay on your machine.
+- Explore the predictions in an interactive dashboard: hover for details, click a chart to filter the priority table, search, export to CSV and open a detail sheet per invoice. With local data it shows company names and fiscal addresses; they can be hidden for screenshots.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     A[(comprobantes.parquet<br/>150k invoices)] --> B[Inspection]
-    A --> C[MapReduce<br/>by supplier]
-    S[[SUNAT registry<br/>ZIP ~400 MB]] --> D[Scraping + parsing<br/>by chunks]
+    A --> C[Summary by supplier<br/>map / reduce]
+    S[[SUNAT registry<br/>ZIP ~400 MB]] --> D[Download and parse<br/>by chunks]
     D --> M[(MongoDB<br/>upsert by RUC)]
-    D --> K[(Local backup CSV)]
-    M --> E[Dataset preparation<br/>+ leakage-safe features]
+    D --> K[(Local backup)]
+    M --> E[Dataset preparation<br/>and features]
     K --> E
     A --> E
     E --> F[Training<br/>7 models x 2 experiments]
-    F --> G[Calibration +<br/>threshold tuning]
-    G --> H[Prediction of<br/>pending invoices]
-    H --> I[Desktop app<br/>+ risk dashboard]
+    F --> G[Calibration and<br/>threshold]
+    G --> H[Pending invoice<br/>scoring]
+    H --> I[Desktop app<br/>and dashboard]
 ```
 
 ## Results
 
-Evaluated on the most recent 20% of the invoices (chronological hold-out test set, 20,000 records):
+Test set: the most recent 20% of the definitive invoices (20,000 records), kept out of training and validation.
 
-| Metric | Value | Reading |
+| Metric | Value | Notes |
 |---|---:|---|
-| Selected model | XGBoost + SUNAT features | Best validation PR-AUC |
-| PR-AUC | **0.124** | 1.4× the no-skill baseline (0.088 = incident rate) |
-| Recall (incidents) | **66.1%** | Share of real incidents caught |
-| Precision (incidents) | 12.4% | Flagged invoices that are real incidents |
-| Invoices flagged for review | 45.1% | Review effort at the chosen threshold |
+| Model | XGBoost with SUNAT features | Best PR-AUC on validation |
+| PR-AUC | 0.124 | Baseline (incident rate) is 0.088 |
+| Recall | 66.1% | Incidents detected |
+| Precision | 12.4% | Flagged invoices that were real incidents |
+| Flagged for review | 45.1% | Share of pending invoices above the threshold |
 
-**Honest assessment:** the signal is real but **limited**. Reviewing 45% of the pending invoices catches two out of three incidents, but precision is low. The SUNAT features add only a small gain over supplier history alone, and the extra registries (retention agents, good taxpayers, perception agents) have a permutation importance of practically zero on this dataset: they are kept as configurable options, not presented as an improvement. `outputs/comparacion_aporte_sunat.csv` quantifies the SUNAT contribution per model.
+The model finds two out of three incidents while reviewing less than half of the pending invoices, but precision is low, so it works as a way to order the review queue rather than as a classifier. The SUNAT status adds a small improvement over supplier history alone. The extra registries (retention agents, good taxpayers, perception agents) did not improve the model on this data; their permutation importance is close to zero. They remain available in the settings. `outputs/comparacion_aporte_sunat.csv` shows the contribution of the SUNAT features per model.
 
 ## Screenshots
 
-| Machine learning module | Compact layout (860 px) |
+| Machine learning module | Narrow window (860 px) |
 |---|---|
-| <img src="docs/images/ml.png" alt="Machine learning module" width="100%"> | <img src="docs/images/compacto.png" alt="Compact responsive layout" width="100%"> |
+| <img src="docs/images/ml.png" alt="Machine learning module" width="100%"> | <img src="docs/images/compacto.png" alt="Narrow window" width="100%"> |
 
 <details>
-<summary>Dashboard: filterable priority table (names hidden)</summary>
+<summary>Priority table (names hidden)</summary>
 
-<img src="docs/images/dashboard_detalle.png" alt="Dashboard detail" width="100%">
+<img src="docs/images/dashboard_detalle.png" alt="Priority table" width="100%">
 </details>
 
 <details>
-<summary>Settings: data import, SUNAT sources and MongoDB</summary>
+<summary>Settings</summary>
 
-<img src="docs/images/configuracion.png" alt="Settings panel" width="100%">
+<img src="docs/images/configuracion.png" alt="Settings" width="100%">
 </details>
 
-## Quick start
+## Getting started
 
 ```bash
 git clone https://github.com/Mianvarh/facturisk-sunat.git
 cd facturisk-sunat
 python -m venv .venv
-.venv\Scripts\activate                     # Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt            # optional: pip install -r requirements-optional.txt
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-optional.txt   # XGBoost, LightGBM and CatBoost
 
-python main.py gui                         # desktop app
-python main.py todo                        # or run the whole pipeline from the terminal
-python scripts/crear_acceso_directo.py     # Windows: desktop shortcut with the app icon
+python main.py gui               # desktop app
+python main.py todo              # full pipeline from the terminal
+python main.py                   # interactive menu
 ```
 
-> On Windows, prefer the python.org installer over the Microsoft Store build: Store Python runs as a packaged app, so the taskbar always shows the Python logo instead of the FactuRisk icon.
-
-The repository ships with everything needed to run **offline**: the invoice dataset and a SUNAT snapshot. Scraping the live registry and using MongoDB are optional:
+The repository includes the invoice dataset and a SUNAT snapshot, so it runs offline. To use live SUNAT data and MongoDB:
 
 ```bash
-docker compose up -d                       # local MongoDB
-cp .env.example .env                       # point MONGODB_URI to it (or to MongoDB Atlas)
-python main.py scraping                    # download the current SUNAT registry
-python main.py mongodb                     # upsert suppliers into MongoDB
+docker compose up -d             # local MongoDB (or use MongoDB Atlas)
+python main.py scraping
+python main.py mongodb
 ```
 
-Each phase can also run on its own: `inspect`, `distribuido`, `scraping`, `mongodb`, `preparar`, `entrenar`, `predecir`, `documentar`.
+The MongoDB connection can be set in the app (Configuración) or in a `.env` file based on `.env.example`. On Windows, `python scripts/crear_acceso_directo.py` creates a desktop shortcut.
 
-Your own data, SUNAT sources and MongoDB credentials are set from **Configuración** in the app. They are stored in `config/app_settings.json`, `config/configuracion.json` and `data/raw/local/`, all excluded from Git.
+Tests:
 
-## Key technical decisions
+```bash
+python -m pytest
+```
 
-- **Temporal validation, not random splits.** Train, validation and test are chronological, so the model is always evaluated on invoices that come after the ones it learned from.
-- **No target leakage.** Supplier-history features use only earlier invoices, and the smoothing prior uses only earlier days. Tests assert that neither the current nor any future outcome changes a row's features.
-- **Recall-first threshold.** The threshold maximizes F1 among the thresholds that reach at least 60% recall, because a missed incident costs more than an extra review.
-- **Calibrated probabilities.** Sigmoid and isotonic calibration are applied only when they improve the Brier score without hurting PR-AUC.
-- **Graceful degradation.** MongoDB → local scraping backup → bundled snapshot, so the pipeline always runs.
-- **Chunked I/O.** The SUNAT file (~1.5 GB uncompressed) is streamed in chunks and never loaded whole.
+## Design decisions
+
+- Train, validation and test sets are split by date, so every evaluation uses invoices that come after the training data.
+- Supplier-history features only use earlier invoices, and the smoothing prior only uses earlier days. There are tests that check that neither the current outcome nor future outcomes change a row's features.
+- The threshold maximizes F1 among the thresholds with at least 60% recall, since a missed incident costs more than an extra review.
+- Calibration (sigmoid or isotonic) is kept only if it improves the Brier score without lowering PR-AUC.
+- SUNAT data is read from MongoDB, then from the local backup, then from the bundled snapshot.
+- The uncompressed SUNAT file (~1.5 GB) is read in chunks and never loaded at once.
 
 ## Project structure
 
 ```
-├── main.py                    # CLI and interactive menu; runs each phase as a subprocess
+├── main.py                        CLI and menu; runs each phase as a subprocess
 ├── src/
-│   ├── inspect_data.py        # 01 data quality report
-│   ├── distributed_processing.py  # 02 MapReduce by chunks
-│   ├── scrape_sunat.py        # 03 SUNAT registry download and parsing
-│   ├── load_mongodb.py        # 04 MongoDB upsert
-│   ├── prepare_dataset.py     # 05 merge + dataset split
-│   ├── feature_engineering.py #    leakage-safe supplier history
-│   ├── train_model.py         # 06 model comparison, calibration, threshold
-│   ├── predict_pending.py     # 07 risk prediction and explanations
-│   ├── generate_documentation_data.py  # 08 reports and docs
-│   ├── gui_app.py             # desktop app (ML module)
-│   ├── dashboard.py           # risk dashboard view
-│   └── theme.py, ui_widgets.py, dashboard_data.py
-├── data/raw/                  # comprobantes.parquet + SUNAT snapshot (tracked)
-├── tests/                     # pytest suite (runs in CI)
-├── scripts/                   # dataset conversion and asset generation
-└── docs/                      # technical documentation (Spanish)
+│   ├── inspect_data.py            data quality report
+│   ├── distributed_processing.py  summary by supplier in chunks
+│   ├── scrape_sunat.py            SUNAT reduced registry
+│   ├── fuentes_externas.py        extra SUNAT registries
+│   ├── load_mongodb.py            MongoDB upsert
+│   ├── prepare_dataset.py         merge and dataset split
+│   ├── feature_engineering.py     supplier-history features
+│   ├── train_model.py             model comparison, calibration and threshold
+│   ├── predict_pending.py         scoring of pending invoices
+│   ├── importar_datos.py          CSV / Excel import
+│   ├── gui_app.py                 desktop app
+│   ├── dashboard.py               risk dashboard
+│   └── settings_view.py           settings panel
+├── data/raw/                      invoice dataset and SUNAT snapshots
+├── tests/                         pytest suite (runs on every push)
+├── scripts/                       dataset conversion, icons, desktop shortcut
+└── docs/                          technical documentation (Spanish)
 ```
 
 ## About the data
 
-This project started as an academic project for the Data Management course at **Universidad Autónoma del Perú**, using real invoice data from a Peruvian electronic-invoicing company. For this public version:
-
-- the company name, supplier names and customer names were removed;
-- the dataset was converted to Parquet with typed columns (`scripts/convertir_dataset.py`);
-- the bundled SUNAT snapshot contains only tax status fields (no names or addresses). Running the scraping phase retrieves the full public registry locally.
-
-## Documentation
-
-Detailed documentation (in Spanish) is in [`docs/`](docs): architecture, data dictionary, full flow, results interpretation, installation and user manuals.
+I built the first version of this project for the Data Management course at Universidad Autónoma del Perú, with invoice data from a Peruvian e-invoicing company. In this public version the company, supplier and customer names were removed, the dataset was converted to Parquet (`scripts/convertir_dataset.py`), and the SUNAT snapshot only keeps tax status fields. Running the scraping phase downloads the full public registry locally.
 
 ## Author
 
-**Miguel Angel Vargas Hilario**, Systems Engineering student at Universidad Autónoma del Perú.
-✉️ varhimiguel@gmail.com · [GitHub](https://github.com/Mianvarh)
-
-The desktop interface redesign, visual identity and code audit were done with AI assistance.
+Miguel Angel Vargas Hilario, Systems Engineering student at Universidad Autónoma del Perú.
+varhimiguel@gmail.com · [GitHub](https://github.com/Mianvarh)
 
 ## License
 

@@ -1,29 +1,27 @@
 # Manual de instalación para desarrollo
 
 ## Requisitos
-Python 3.11 o superior recomendado.
+Python 3.11 o superior. En Windows se recomienda el instalador de python.org.
 
 ## Entorno virtual
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-optional.txt
 ```
 
 ## Configuración
-Cree `.env` desde `.env.example` con las variables `MONGODB_URI`, `MONGODB_DATABASE` y `MONGODB_COLLECTION_SUNAT`. No suba credenciales a repositorios públicos.
+La conexión a MongoDB se configura desde la aplicación (Configuración) o con un archivo `.env` creado a partir de `.env.example`. Ninguno de los dos se sube al repositorio.
 
 ## Ejecución
 ```powershell
-python .\main.py
-python .\main.py gui
-python .\main.py todo
+python main.py
+python main.py gui
+python main.py todo
 ```
 
-## Compilación
+## Pruebas
 ```powershell
-.\build_windows_gui.bat
+python -m pytest
 ```
-
-## Pruebas sugeridas
-Ejecutar `py_compile`, `preflight_check.py`, `show_final_results.py --no-gui` y una prueba del portable en una carpeta aislada.
