@@ -7,9 +7,9 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
+import matplotlib
 import numpy as np
 import pandas as pd
-import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -18,12 +18,16 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from configuracion import PADRON_COLUMNS, cargar_mongo_config
-from fuentes_externas import cargar_variables_padrones
-from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, leer_comprobantes, normalizar_ruc
+from datos import (
+    SUNAT_BACKUP_CSV,
+    SUNAT_SNAPSHOT_PATH,
+    leer_comprobantes,
+    normalizar_ruc,
+)
 from feature_engineering import HISTORICAL_FEATURES, crear_variables_historicas_sin_fuga
+from fuentes_externas import cargar_variables_padrones
 from paths import ensure_directories, get_application_root
 from theme import PALETTE, apply_chart_style, diverging_cmap
-
 
 apply_chart_style()
 
@@ -296,9 +300,9 @@ def crear_reporte(
     )
 
     return {
-        "filas_historicas": int(len(df_completo)),
-        "filas_con_estado_definitivo": int(len(dataset_modelo)),
-        "filas_pendientes": int(len(dataset_pendientes)),
+        "filas_historicas": len(df_completo),
+        "filas_con_estado_definitivo": len(dataset_modelo),
+        "filas_pendientes": len(dataset_pendientes),
         "coincidencias_sunat": merge_stats["coincidencias_sunat_filas"],
         "no_encontrados": merge_stats["no_encontrados_sunat_filas"],
         "ruc_con_coincidencia": merge_stats["ruc_con_coincidencia"],
@@ -401,7 +405,7 @@ def generar_matriz_correlacion_pearson(dataset_modelo: pd.DataFrame) -> dict[str
         "generado": True,
         "grafico": str(png_path),
         "tabla": str(csv_path),
-        "variables_evaluadas": int(len(target_correlations)),
+        "variables_evaluadas": len(target_correlations),
         "top_10_correlaciones": {
             str(variable): round(float(value), 6)
             for variable, value in target_correlations.head(10).items()

@@ -8,6 +8,7 @@ MongoDB precedence: panel settings, then the .env file.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from copy import deepcopy
@@ -137,10 +138,8 @@ def leer_mongo_panel() -> dict[str, Any]:
 
     defaults = {"mongodb_uri": "", "mongodb_database": "facturisk", "mongodb_collection": "proveedores_sunat", "usar_mongodb": True}
     if MONGO_SETTINGS_PATH.exists():
-        try:
+        with contextlib.suppress(OSError, json.JSONDecodeError):
             defaults.update(json.loads(MONGO_SETTINGS_PATH.read_text(encoding="utf-8-sig")))
-        except (OSError, json.JSONDecodeError):
-            pass
     return defaults
 
 

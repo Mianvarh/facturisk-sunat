@@ -18,7 +18,13 @@ from pathlib import Path
 import pandas as pd
 
 from configuracion import actualizar_ajustes
-from datos import COMPROBANTES_PATH, DATE_COLUMNS, IMPORTED_DATASET_PATH, PROJECT_ROOT, normalizar_ruc
+from datos import (
+    COMPROBANTES_PATH,
+    DATE_COLUMNS,
+    IMPORTED_DATASET_PATH,
+    PROJECT_ROOT,
+    normalizar_ruc,
+)
 
 REQUIRED = ["RUC_Proveedor", "Fecha_Emision", "Importe_Total", "Estado_Aceptacion"]
 OPTIONAL_DEFAULTS = {

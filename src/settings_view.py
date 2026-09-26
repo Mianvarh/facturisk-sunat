@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import BooleanVar, StringVar, filedialog, messagebox, ttk
-from typing import Callable
 
 import pandas as pd
 from PIL import ImageTk
@@ -157,7 +157,9 @@ class SettingsView(ttk.Frame):
         self.import_result.configure(
             foreground=PALETTE["nav_text"],
             text=(
-                f"✓ {report.filas:,} comprobantes importados de {report.archivo} ({report.rucs_unicos:,} proveedores).\n\n"
+                f"✓ {report.filas:,} comprobantes importados de {report.archivo} ({report.rucs_unicos:,} proveedores).\n"
+                f"Periodo: {' – '.join(report.rango_fechas) if report.rango_fechas else 'sin fechas válidas'} · "
+                f"Razón social: {'incluida' if report.con_razon_social else 'no incluida (se usará la de SUNAT)'}\n\n"
                 f"Columnas detectadas:\n{mapping}\n\nEstados: {states}\n\nAdvertencias:\n{warnings}\n\n"
                 "Ejecuta el pipeline desde el Paso 01 para entrenar con estos datos."
             ),

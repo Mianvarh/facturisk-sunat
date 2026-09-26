@@ -13,7 +13,6 @@ import requests
 from datos import ruta_comprobantes
 from paths import ensure_directories, get_application_root
 
-
 PROJECT_ROOT = get_application_root()
 SUNAT_URL = "https://www.sunat.gob.pe/descargaPRR/mrc137_padron_reducido.html"
 

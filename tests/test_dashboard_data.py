@@ -8,12 +8,12 @@ import pytest
 from dashboard_data import (
     DashboardData,
     amount_vs_probability,
+    filter_predictions,
     kpis,
     load_dashboard_data,
+    padron_risk,
     risk_heatmap,
     risk_level_counts,
-    filter_predictions,
-    padron_risk,
     supplier_names,
     top_risk_factors,
 )

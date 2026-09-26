@@ -8,10 +8,11 @@ from typing import Any
 
 import joblib
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
-from paths import ensure_directories, get_application_root
 from configuracion import PADRON_COLUMNS
+from paths import ensure_directories, get_application_root
 from theme import PALETTE, RISK_COLORS, apply_chart_style
 
 apply_chart_style()
@@ -95,18 +96,11 @@ def validar_columnas(df: pd.DataFrame, features: list[str]) -> None:
         raise ValueError(f"Faltan columnas requeridas para predecir: {', '.join(missing)}")
 
 
-def calcular_nivel_riesgo(probability: float) -> str:
-    """Map incidence probability into business risk levels."""
+def calcular_nivel_riesgo(probabilities: pd.Series, bajo_medio: float, medio_alto: float) -> pd.Series:
+    """Map incidence probabilities into business risk levels."""
 
-    if probability < calcular_nivel_riesgo.bajo_medio:
-        return "Bajo"
-    if probability < calcular_nivel_riesgo.medio_alto:
-        return "Medio"
-    return "Alto"
-
-
-calcular_nivel_riesgo.bajo_medio = 0.30
-calcular_nivel_riesgo.medio_alto = 0.60
+    levels = np.select([probabilities < bajo_medio, probabilities < medio_alto], ["Bajo", "Medio"], default="Alto")
+    return pd.Series(levels, index=probabilities.index)
 
 
 def explicar_fila(row: pd.Series) -> str:
@@ -137,9 +131,9 @@ def predecir_pendientes() -> pd.DataFrame:
     pipeline = bundle["pipeline"]
     features = list(bundle["features"])
     threshold = float(bundle.get("threshold", 0.50))
-    risk_cuts = bundle.get("risk_cuts", {"bajo_medio": 0.30, "medio_alto": 0.60})
-    calcular_nivel_riesgo.bajo_medio = float(risk_cuts.get("bajo_medio", 0.30))
-    calcular_nivel_riesgo.medio_alto = float(risk_cuts.get("medio_alto", 0.60))
+    risk_cuts = bundle.get("risk_cuts", {})
+    bajo_medio = float(risk_cuts.get("bajo_medio", 0.30))
+    medio_alto = float(risk_cuts.get("medio_alto", 0.60))
 
     df = leer_pendientes()
     validar_columnas(df, features)
@@ -158,7 +152,7 @@ def predecir_pendientes() -> pd.DataFrame:
     output["Probabilidad_Incidencia"] = probabilities
     output["Prediccion_Codigo"] = predictions
     output["Prediccion_Texto"] = output["Prediccion_Codigo"].map(PREDICTION_LABELS)
-    output["Nivel_Riesgo"] = output["Probabilidad_Incidencia"].map(calcular_nivel_riesgo)
+    output["Nivel_Riesgo"] = calcular_nivel_riesgo(output["Probabilidad_Incidencia"], bajo_medio, medio_alto)
     output["Razones_Principales"] = df.apply(explicar_fila, axis=1)
     output = output[OUTPUT_COLUMNS + extra]
 
@@ -172,8 +166,8 @@ def predecir_pendientes() -> pd.DataFrame:
     print(f"Umbral de clasificacion usado: {threshold:.2f}")
     print(
         "Cortes de riesgo usados: "
-        f"Bajo < {calcular_nivel_riesgo.bajo_medio:.4f}, "
-        f"Medio < {calcular_nivel_riesgo.medio_alto:.4f}, Alto >= {calcular_nivel_riesgo.medio_alto:.4f}"
+        f"Bajo < {bajo_medio:.4f}, "
+        f"Medio < {medio_alto:.4f}, Alto >= {medio_alto:.4f}"
     )
     print("\nDistribucion de predicciones:")
     print(output["Prediccion_Texto"].value_counts().to_string())
@@ -195,14 +189,6 @@ def predecir_pendientes() -> pd.DataFrame:
             ]
         ].to_string(index=False)
     )
-
-    try:
-        from show_final_results import mostrar_resumen_final
-
-        mostrar_resumen_final(no_gui=False, ask_gui=True)
-    except Exception as exc:
-        logging.exception("No fue posible mostrar el resumen final: %s", exc)
-        print("La prediccion termino correctamente, pero no fue posible mostrar el resumen visual.")
 
     return output
 

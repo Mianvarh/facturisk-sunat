@@ -7,7 +7,11 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 
 import feature_engineering
-from feature_engineering import HISTORICAL_FEATURES, _rolling_previous_counts, crear_variables_historicas_sin_fuga
+from feature_engineering import (
+    HISTORICAL_FEATURES,
+    _rolling_previous_counts,
+    crear_variables_historicas_sin_fuga,
+)
 
 
 def _rolling_previous_counts_reference(group: pd.DataFrame) -> pd.DataFrame:

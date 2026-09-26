@@ -11,10 +11,11 @@ from __future__ import annotations
 import os
 import sys
 import tkinter as tk
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from tkinter import StringVar, ttk
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib
 
@@ -29,7 +30,14 @@ from PIL import Image, ImageTk
 import dashboard_data as dd
 from configuracion import PADRONES_SUNAT
 from paths import get_application_root
-from theme import FONT, PALETTE, RISK_COLORS, apply_chart_style, model_display_name, sequential_cmap
+from theme import (
+    FONT,
+    PALETTE,
+    RISK_COLORS,
+    apply_chart_style,
+    model_display_name,
+    sequential_cmap,
+)
 from ui_widgets import (
     DonutRing,
     FitLabel,
@@ -64,13 +72,6 @@ HIDDEN_NAME = "•••••• (oculto)"
 
 def _fmt_int(value: float) -> str:
     return f"{value:,.0f}"
-
-
-def _fmt_pct(value: Any) -> str:
-    try:
-        return f"{float(value) * 100:.1f}%"
-    except (TypeError, ValueError):
-        return "N/D"
 
 
 def _clean_axes(ax: Any, grid_axis: str = "y") -> None:
@@ -206,9 +207,6 @@ class DashboardView(ttk.Frame):
             return names.where(names.eq(""), HIDDEN_NAME)
         return names
 
-    def _supplier_label(self, ruc: str, name: str) -> str:
-        return f"{ruc}\n{name}" if name else str(ruc)
-
     # ------------------------------------------------------------------ refresh
 
     def refresh(self) -> None:
@@ -329,7 +327,7 @@ class DashboardView(ttk.Frame):
     @staticmethod
     def _bar_hover(bars: Any, texts: list[str]) -> Callable[[Any], tuple[tuple[float, float], str] | None]:
         def handler(event: Any) -> tuple[tuple[float, float], str] | None:
-            for bar, text in zip(bars, texts):
+            for bar, text in zip(bars, texts, strict=True):
                 if bar.contains(event)[0]:
                     return (bar.get_x() + bar.get_width() / 2, bar.get_y() + bar.get_height()), text
             return None
@@ -339,7 +337,7 @@ class DashboardView(ttk.Frame):
     @staticmethod
     def _barh_hover(bars: Any, texts: list[str]) -> Callable[[Any], tuple[tuple[float, float], str] | None]:
         def handler(event: Any) -> tuple[tuple[float, float], str] | None:
-            for bar, text in zip(bars, texts):
+            for bar, text in zip(bars, texts, strict=True):
                 if bar.contains(event)[0]:
                     return (bar.get_x() + bar.get_width(), bar.get_y() + bar.get_height() / 2), text
             return None
@@ -349,7 +347,7 @@ class DashboardView(ttk.Frame):
     @staticmethod
     def _bar_click(bars: Any, values: list[Any], action: Callable[[Any], None]) -> Callable[[Any], bool]:
         def handler(event: Any) -> bool:
-            for bar, value in zip(bars, values):
+            for bar, value in zip(bars, values, strict=True):
                 if bar.contains(event)[0]:
                     action(value)
                     return True
@@ -490,7 +488,7 @@ class DashboardView(ttk.Frame):
         def cell(event: Any) -> tuple[int, int] | None:
             if event.xdata is None or event.ydata is None:
                 return None
-            col, row = int(round(event.xdata)), int(round(event.ydata))
+            col, row = round(event.xdata), round(event.ydata)
             if 0 <= row < matrix.shape[0] and 0 <= col < matrix.shape[1] and not np.isnan(matrix[row, col]):
                 return row, col
             return None
@@ -561,7 +559,7 @@ class DashboardView(ttk.Frame):
         positions = list(range(len(ordered)))
         ax.hlines(positions, 0, ordered.values, color=PALETTE["line"], linewidth=2)
         ax.scatter(ordered.values, positions, s=90, color=PALETTE["danger"], zorder=3)
-        for position, value in zip(positions, ordered.values):
+        for position, value in zip(positions, ordered.values, strict=True):
             ax.annotate(f"{value:,}", (value, position), xytext=(9, 0), textcoords="offset points", va="center", fontsize=8, color=PALETTE["muted"])
         ax.set_yticks(positions, labels=ordered.index)
         ax.set_xlim(0, ordered.max() * 1.22)
@@ -572,7 +570,7 @@ class DashboardView(ttk.Frame):
         def row_at(event: Any) -> int | None:
             if event.ydata is None:
                 return None
-            position = int(round(event.ydata))
+            position = round(event.ydata)
             return position if 0 <= position < len(ordered) and abs(event.ydata - position) < 0.4 else None
 
         def hover(event: Any) -> tuple[tuple[float, float], str] | None:
@@ -610,14 +608,14 @@ class DashboardView(ttk.Frame):
         box, fig, canvas = self._chart_card(grid, "Proveedores con más riesgo alto", caption)
         ax = fig.add_subplot()
         ordered = table.iloc[::-1]
-        labels = [_short(name, 26) if name else ruc for ruc, name in zip(ordered.index.astype(str), ordered["nombre"])]
+        labels = [_short(name, 26) if name else ruc for ruc, name in zip(ordered.index.astype(str), ordered["nombre"], strict=True)]
         bars = ax.barh(labels, ordered["riesgo_alto"], color=PALETTE["accent"], height=0.55)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         _clean_axes(ax, grid_axis="x")
         tip = self._tooltip(canvas, ax)
         texts = [
             f"{name or 'Razón social no disponible'}\nRUC {ruc}\n{int(row['riesgo_alto'])} en riesgo alto · prob. media {row['probabilidad_media']:.1%}\nImporte {row['importe']:,.2f}"
-            for ruc, name, (_, row) in zip(ordered.index.astype(str), ordered["nombre"], ordered.iterrows())
+            for ruc, name, (_, row) in zip(ordered.index.astype(str), ordered["nombre"], ordered.iterrows(), strict=True)
         ]
         tip.hover_handlers.append(self._barh_hover(bars, texts))
         tip.click_handlers.append(self._bar_click(bars, list(ordered.index.astype(str)), lambda ruc: self.set_filter(ruc=ruc, level="Todos")))

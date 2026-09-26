@@ -75,20 +75,6 @@ def risk_level_counts(pred: pd.DataFrame) -> pd.Series:
     return pred["Nivel_Riesgo"].value_counts().reindex(RISK_LEVELS, fill_value=0)
 
 
-def high_risk_share_by_type(pred: pd.DataFrame) -> pd.DataFrame:
-    """Share of high-risk invoices per voucher type, largest first."""
-
-    grouped = pred.groupby("Tipo_Comprobante", dropna=False)
-    table = pd.DataFrame(
-        {
-            "comprobantes": grouped.size(),
-            "riesgo_alto": grouped["Nivel_Riesgo"].apply(lambda levels: int((levels == "Alto").sum())),
-        }
-    )
-    table["porcentaje_alto"] = table["riesgo_alto"] / table["comprobantes"] * 100
-    return table.sort_values("porcentaje_alto", ascending=False)
-
-
 def risk_by_month(pred: pd.DataFrame) -> pd.DataFrame | None:
     """Mean incidence probability and high-risk count per emission month."""
 
@@ -105,19 +91,6 @@ def risk_by_month(pred: pd.DataFrame) -> pd.DataFrame | None:
     )
 
 
-def top_suppliers(pred: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
-    """Suppliers (by RUC) with the most high-risk pending invoices."""
-
-    high = pred[pred["Nivel_Riesgo"] == "Alto"]
-    table = (
-        high.groupby("RUC_Proveedor")
-        .agg(riesgo_alto=("ID_Comprobante", "size"), probabilidad_media=("Probabilidad_Incidencia", "mean"))
-        .sort_values(["riesgo_alto", "probabilidad_media"], ascending=False)
-        .head(limit)
-    )
-    return table
-
-
 def top_risk_factors(pred: pd.DataFrame, limit: int = 6) -> pd.Series:
     """Most frequent explanation factors among high-risk invoices."""
 
@@ -127,17 +100,6 @@ def top_risk_factors(pred: pd.DataFrame, limit: int = 6) -> pd.Series:
     # Group variants such as "Estado RUC BAJA DE OFICIO" under their generic factor.
     factors = factors.str.replace(r"^(Estado RUC|Domicilio) .+$", r"\1 irregular", regex=True)
     return factors.value_counts().head(limit)
-
-
-def top_invoices(pred: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
-    """Pending invoices with the highest incidence probability."""
-
-    columns = [
-        column
-        for column in ["ID_Comprobante", "RUC_Proveedor", "Tipo_Comprobante", "Importe_Total", "Probabilidad_Incidencia", "Nivel_Riesgo", "Razones_Principales"]
-        if column in pred.columns
-    ]
-    return pred.nlargest(limit, "Probabilidad_Incidencia")[columns]
 
 
 def risk_heatmap(pred: pd.DataFrame, max_months: int = 12) -> pd.DataFrame | None:

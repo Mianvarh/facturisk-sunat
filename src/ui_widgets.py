@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import tkinter as tk
 import tkinter.font
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from tkinter import ttk
-from typing import Any, Callable
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -214,7 +215,7 @@ class RoundedCard(tk.Canvas):
         self.create_line(width - 1, r, width - 1, height - r, fill=border, tags="surface")
         corners = _corner_images(r, fill, border, self.bg_color)
         self._corners = [ImageTk.PhotoImage(image) for image in corners]
-        for image, (x, y) in zip(self._corners, [(0, 0), (width - r, 0), (0, height - r), (width - r, height - r)]):
+        for image, (x, y) in zip(self._corners, [(0, 0), (width - r, 0), (0, height - r), (width - r, height - r)], strict=True):
             self.create_image(x, y, image=image, anchor="nw", tags="surface")
         self.tag_lower("surface")
 
@@ -389,7 +390,7 @@ class SegmentedControl(tk.Canvas):
 
     def _on_click(self, event: tk.Event) -> None:
         x = 4
-        for option, width in zip(self.options, self.widths):
+        for option, width in zip(self.options, self.widths, strict=True):
             if x <= event.x < x + width:
                 if option != self.selected:
                     self.selected = option
@@ -403,7 +404,7 @@ class SegmentedControl(tk.Canvas):
         self._images = [ImageTk.PhotoImage(rounded_image(sum(self.widths) + 8, 38, 19, PALETTE["surface_alt"], self.parent_bg))]
         self.create_image(0, 0, image=self._images[0], anchor="nw")
         x = 4
-        for option, width in zip(self.options, self.widths):
+        for option, width in zip(self.options, self.widths, strict=True):
             selected = option == self.selected
             if selected:
                 pill = ImageTk.PhotoImage(rounded_image(width, 30, 15, PALETTE["primary"], PALETTE["surface_alt"]))

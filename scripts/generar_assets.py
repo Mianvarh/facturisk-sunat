@@ -8,10 +8,11 @@ que el diseño es reproducible:
 
 from __future__ import annotations
 
+import itertools
 import math
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from PIL import Image, ImageDraw
 
@@ -83,7 +84,7 @@ def _path(draw: ImageDraw.ImageDraw, s: int, points: list[tuple[float, float]], 
     r = width / 2
     step = max(width * 0.12, 1.0)
     fill = hex_rgba(color)
-    for (x0, y0), (x1, y1) in zip(scaled, scaled[1:]):
+    for (x0, y0), (x1, y1) in itertools.pairwise(scaled):
         length = math.hypot(x1 - x0, y1 - y0)
         count = max(int(length / step), 1)
         for index in range(count + 1):

@@ -18,7 +18,12 @@ import pandas as pd
 import requests
 
 from configuracion import PADRON_COLUMNS, PADRONES_SUNAT, cargar_ajustes
-from datos import PADRONES_BACKUP_CSV, PADRONES_SNAPSHOT_PATH, PROJECT_ROOT, normalizar_ruc
+from datos import (
+    PADRONES_BACKUP_CSV,
+    PADRONES_SNAPSHOT_PATH,
+    PROJECT_ROOT,
+    normalizar_ruc,
+)
 
 PADRONES_DIR = PROJECT_ROOT / "data" / "raw" / "sunat" / "padrones"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) FactuRisk-SUNAT"

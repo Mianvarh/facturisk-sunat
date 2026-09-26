@@ -10,7 +10,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 SMOOTHING = 5.0
@@ -163,7 +162,7 @@ def crear_variables_historicas_sin_fuga(df: pd.DataFrame) -> tuple[pd.DataFrame,
 
     leakage_report = {
         "control": "Variables historicas calculadas con shift(1), acumulados desplazados y ventanas anteriores al registro.",
-        "registros": int(len(result)),
+        "registros": len(result),
         "tasa_global_historica": global_rate,
         "prior_suavizado": "tasa global con comprobantes de dias anteriores (sin fila actual ni futuro)",
         "proveedores_nuevos": int(result["proveedor_nuevo"].sum()),

@@ -44,10 +44,9 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from configuracion import PADRON_COLUMNS
 from feature_engineering import HISTORICAL_FEATURES
-from transformadores import RellenadorNAcategoricas
 from paths import ensure_directories, get_application_root
 from theme import CHART_SERIES, PALETTE, apply_chart_style, sequential_cmap
-
+from transformadores import RellenadorNAcategoricas
 
 apply_chart_style()
 
@@ -145,33 +144,29 @@ def configurar_logging() -> None:
     )
 
 
-def optional_package_status() -> dict[str, bool]:
-    """Report optional ML libraries that are actually usable.
+OPTIONAL_ESTIMATORS = {
+    "xgboost": "XGBClassifier",
+    "lightgbm": "LGBMClassifier",
+    "catboost": "CatBoostClassifier",
+}
 
-    In portable builds a package can be present but unusable because its native
-    DLLs were not bundled. Import the relevant estimator classes to catch that
-    case before training starts.
+
+def optional_package_status() -> dict[str, bool]:
+    """Report which optional model libraries can actually be imported.
+
+    A package can be installed but unusable (for example, missing native DLLs
+    in a portable build), so the estimator class itself is imported.
     """
 
-    checks: dict[str, str] = {
-        "xgboost": "from xgboost import XGBClassifier",
-        "lightgbm": "from lightgbm import LGBMClassifier",
-        "catboost": "from catboost import CatBoostClassifier",
-        "imblearn": "import imblearn",
-        "shap": "import shap",
-        "optuna": "import optuna",
-    }
     status: dict[str, bool] = {}
-    for package, statement in checks.items():
-        if importlib.util.find_spec(package) is None:
-            status[package] = False
-            continue
+    for package, estimator in OPTIONAL_ESTIMATORS.items():
         try:
-            exec(statement, {})
+            getattr(importlib.import_module(package), estimator)
             status[package] = True
-        except Exception as exc:
+        except Exception as exc:  # ImportError, OSError from native libraries, AttributeError
             status[package] = False
-            logging.warning("Libreria opcional no utilizable: %s (%s)", package, exc)
+            if importlib.util.find_spec(package) is not None:
+                logging.warning("Libreria opcional no utilizable: %s (%s)", package, exc)
     return status
 
 
@@ -554,10 +549,10 @@ def train_all(df: pd.DataFrame, train: pd.DataFrame, validation: pd.DataFrame) -
     """Train all requested experiments and models."""
 
     status = optional_package_status()
-    missing_optional = [name for name, installed in status.items() if not installed and name != "imblearn"]
+    missing_optional = [name for name, installed in status.items() if not installed]
     if missing_optional:
         print(f"Librerias opcionales no instaladas: {', '.join(missing_optional)}")
-        print("Comando sugerido: pip install xgboost lightgbm catboost shap optuna")
+        print("Para comparar mas modelos: pip install -r requirements-optional.txt")
 
     all_results: list[ModelResult] = []
     all_thresholds: list[pd.DataFrame] = []
@@ -727,6 +722,46 @@ def bar_plot(df: pd.DataFrame, x: str, y: str, path: Path, title: str, ylabel: s
     plt.close(fig)
 
 
+def _save_figure(fig: Any, name: str) -> None:
+    fig.tight_layout()
+    fig.savefig(OUTPUTS_DIR / name, dpi=160)
+    plt.close(fig)
+
+
+def _bar_chart(series: pd.Series, name: str, title: str, color: Any, horizontal: bool = False) -> None:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    series.plot(kind="barh" if horizontal else "bar", ax=ax, color=color, title=title)
+    _save_figure(fig, name)
+
+
+def _curve_chart(x: Any, y: Any, name: str, title: str, xlabel: str, ylabel: str, diagonal: bool = False, marker: str | None = None) -> None:
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.plot(x, y, color=PALETTE["primary"], marker=marker)
+    if diagonal:
+        ax.plot([0, 1], [0, 1], linestyle="--", color=PALETTE["subtle"])
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    _save_figure(fig, name)
+
+
+def _threshold_charts(thresholds: pd.DataFrame, chosen: float) -> None:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(thresholds["umbral"], thresholds["f1_clase_1"], label="F1", color=PALETTE["primary"])
+    ax.plot(thresholds["umbral"], thresholds["recall_clase_1"], label="Recall", color=PALETTE["danger"])
+    ax.plot(thresholds["umbral"], thresholds["precision_clase_1"], label="Precision", color=PALETTE["accent"])
+    ax.axvline(chosen, linestyle="--", color=PALETTE["danger"], label=f"Umbral elegido ({chosen:.2f})")
+    ax.legend()
+    ax.set_title("Metricas por umbral")
+    _save_figure(fig, "10_metricas_por_umbral.png")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(thresholds["umbral"], thresholds["falsos_positivos"], color=PALETTE["primary"])
+    ax.set_title("Falsos positivos por umbral")
+    ax.set_xlabel("Umbral")
+    _save_figure(fig, "11_falsos_positivos_por_umbral.png")
+
+
 def generate_graphs(
     df: pd.DataFrame,
     test: pd.DataFrame,
@@ -736,54 +771,47 @@ def generate_graphs(
     aporte: pd.DataFrame,
     calibration_report: dict[str, Any],
 ) -> dict[str, Any]:
-    """Generate requested charts."""
+    """Save the data-quality, model-comparison and evaluation charts."""
 
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     scores = predict_scores(best.estimator, test[best.features])
-    pred_050 = (scores >= 0.50).astype(int)
-    pred_opt = (scores >= best.threshold).astype(int)
-    precision, recall, _ = precision_recall_curve(test[TARGET], scores)
-    fpr, tpr, _ = roc_curve(test[TARGET], scores)
+    y_test = test[TARGET]
 
-    df[TARGET].value_counts().sort_index().plot(kind="bar", title="Distribucion de clases", color=CHART_SERIES[0])
-    plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "01_distribucion_clases.png", dpi=160); plt.close()
-
+    _bar_chart(df[TARGET].value_counts().sort_index(), "01_distribucion_clases.png", "Distribucion de clases", CHART_SERIES[0])
     nulls = df[FEATURES_WITH_SUNAT + [TARGET]].isna().sum().sort_values(ascending=False).head(20)
-    nulls.plot(kind="bar", title="Valores nulos principales", color=CHART_SERIES[1])
-    plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "02_calidad_datos.png", dpi=160); plt.close()
-
-    df["SUNAT_Encontrado"].value_counts().sort_index().plot(kind="bar", title="Cobertura SUNAT", color=CHART_SERIES[2])
-    plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "03_cobertura_sunat.png", dpi=160); plt.close()
+    _bar_chart(nulls, "02_calidad_datos.png", "Valores nulos principales", CHART_SERIES[1])
+    _bar_chart(df["SUNAT_Encontrado"].value_counts().sort_index(), "03_cobertura_sunat.png", "Cobertura SUNAT", CHART_SERIES[2])
 
     comparison["modelo_experimento"] = comparison["modelo"] + " - " + comparison["experimento"]
     bar_plot(comparison, "modelo_experimento", "pr_auc", OUTPUTS_DIR / "04_comparacion_modelos_pr_auc.png", "Comparacion PR-AUC", "PR-AUC")
     bar_plot(comparison, "modelo_experimento", "f1_clase_1", OUTPUTS_DIR / "05_comparacion_modelos_f1.png", "Comparacion F1 clase incidencia", "F1")
 
-    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(recall, precision, color=PALETTE["primary"]); ax.set_title("Curva Precision-Recall"); ax.set_xlabel("Recall"); ax.set_ylabel("Precision"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "06_precision_recall_curve.png", dpi=160); plt.close(fig)
-    fig, ax = plt.subplots(figsize=(7, 5)); ax.plot(fpr, tpr, color=PALETTE["primary"]); ax.plot([0, 1], [0, 1], linestyle="--", color=PALETTE["subtle"]); ax.set_title("Curva ROC"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "07_roc_curve.png", dpi=160); plt.close(fig)
+    precision, recall, _ = precision_recall_curve(y_test, scores)
+    _curve_chart(recall, precision, "06_precision_recall_curve.png", "Curva Precision-Recall", "Recall", "Precision")
+    fpr, tpr, _ = roc_curve(y_test, scores)
+    _curve_chart(fpr, tpr, "07_roc_curve.png", "Curva ROC", "FPR", "TPR", diagonal=True)
 
-    save_confusion(confusion_matrix(test[TARGET], pred_050, labels=[0, 1]).tolist(), OUTPUTS_DIR / "08_matriz_confusion_050.png", "Matriz de confusion umbral 0.50")
-    save_confusion(confusion_matrix(test[TARGET], pred_opt, labels=[0, 1]).tolist(), OUTPUTS_DIR / "09_matriz_confusion_optimizada.png", "Matriz de confusion umbral optimizado")
-    save_confusion(confusion_matrix(test[TARGET], pred_opt, labels=[0, 1]).tolist(), OUTPUTS_DIR / "matriz_confusion_umbral_optimizado.png", "Matriz de confusion umbral optimizado")
-    save_confusion(confusion_matrix(test[TARGET], pred_050, labels=[0, 1]).tolist(), OUTPUTS_DIR / "matriz_confusion.png", "Matriz de confusion umbral 0.50")
+    for threshold, name, title in [
+        (0.50, "08_matriz_confusion_050.png", "Matriz de confusion umbral 0.50"),
+        (best.threshold, "09_matriz_confusion_optimizada.png", "Matriz de confusion umbral optimizado"),
+    ]:
+        predictions = (scores >= threshold).astype(int)
+        save_confusion(confusion_matrix(y_test, predictions, labels=[0, 1]).tolist(), OUTPUTS_DIR / name, title)
 
     best_thresholds = threshold_df[(threshold_df["modelo"] == best.model_name) & (threshold_df["experimento"] == best.experiment)]
-    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["f1_clase_1"], label="F1", color=PALETTE["primary"]); ax.plot(best_thresholds["umbral"], best_thresholds["recall_clase_1"], label="Recall", color=PALETTE["danger"]); ax.plot(best_thresholds["umbral"], best_thresholds["precision_clase_1"], label="Precision", color=PALETTE["accent"]); ax.axvline(best.threshold, linestyle="--", color=PALETTE["danger"], label=f"Umbral elegido ({best.threshold:.2f})"); ax.legend(); ax.set_title("Metricas por umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "10_metricas_por_umbral.png", dpi=160); plt.close(fig)
-    fig, ax = plt.subplots(figsize=(8, 5)); ax.plot(best_thresholds["umbral"], best_thresholds["falsos_positivos"], color=PALETTE["primary"]); ax.set_title("Falsos positivos por umbral"); ax.set_xlabel("Umbral"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "11_falsos_positivos_por_umbral.png", dpi=160); plt.close(fig)
+    _threshold_charts(best_thresholds, best.threshold)
 
-    prob_true, prob_pred = calibration_curve(test[TARGET], scores, n_bins=10, strategy="quantile")
-    fig, ax = plt.subplots(figsize=(6, 5)); ax.plot(prob_pred, prob_true, marker="o", color=PALETTE["primary"]); ax.plot([0, 1], [0, 1], linestyle="--", color=PALETTE["subtle"]); ax.set_title("Curva de calibracion"); ax.set_xlabel("Probabilidad media"); ax.set_ylabel("Fraccion positiva"); fig.tight_layout(); fig.savefig(OUTPUTS_DIR / "12_curva_calibracion.png", dpi=160); plt.close(fig)
+    prob_true, prob_pred = calibration_curve(y_test, scores, n_bins=10, strategy="quantile")
+    _curve_chart(prob_pred, prob_true, "12_curva_calibracion.png", "Curva de calibracion", "Probabilidad media", "Fraccion positiva", diagonal=True, marker="o")
 
     importance_df = variable_importance(best, test)
-    importance_df.head(20).plot(kind="barh", x="variable", y="importancia", legend=False, title="Importancia de variables", color=CHART_SERIES[0])
-    plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "13_importancia_variables.png", dpi=160); plt.close()
-    if importlib.util.find_spec("shap") is None:
-        (OUTPUTS_DIR / "14_shap_resumen.txt").write_text("SHAP no esta instalado. Comando sugerido: pip install shap\n", encoding="utf-8")
+    _bar_chart(importance_df.head(20).set_index("variable")["importancia"], "13_importancia_variables.png", "Importancia de variables", CHART_SERIES[0], horizontal=True)
 
     if not aporte.empty:
         aporte_plot = aporte[["modelo", "pr_auc_delta_abs", "f1_clase_1_delta_abs", "recall_clase_1_delta_abs"]].set_index("modelo")
-        aporte_plot.plot(kind="bar", title="Aporte de variables SUNAT", color=CHART_SERIES)
-        plt.tight_layout(); plt.savefig(OUTPUTS_DIR / "15_aporte_sunat.png", dpi=160); plt.close()
+        fig, ax = plt.subplots(figsize=(9, 5))
+        aporte_plot.plot(kind="bar", ax=ax, title="Aporte de variables SUNAT", color=CHART_SERIES)
+        _save_figure(fig, "15_aporte_sunat.png")
 
     return {"importance": importance_df, "calibration": calibration_report}
 
@@ -840,7 +868,6 @@ def save_reports(
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     comparison.to_csv(OUTPUTS_DIR / "comparacion_modelos.csv", index=False, encoding="utf-8-sig")
-    aporte.to_csv(OUTPUTS_DIR / "comparacion_aporte_sunat_mejorada.csv", index=False, encoding="utf-8-sig")
     aporte.to_csv(OUTPUTS_DIR / "comparacion_aporte_sunat.csv", index=False, encoding="utf-8-sig")
     thresholds.to_csv(OUTPUTS_DIR / "comparacion_umbrales.csv", index=False, encoding="utf-8-sig")
     importance.to_csv(OUTPUTS_DIR / "importancia_variables.csv", index=False, encoding="utf-8-sig")
@@ -886,23 +913,11 @@ def save_reports(
     ]
     report_text = "\n".join(lines)
     (OUTPUTS_DIR / "reporte_modelo.txt").write_text(report_text, encoding="utf-8")
-    (OUTPUTS_DIR / "reporte_final_modelo.txt").write_text(report_text, encoding="utf-8")
     (OUTPUTS_DIR / "resumen_ejecutivo.md").write_text(
         f"# Resumen ejecutivo\n\nMejor modelo: **{best.model_name}**.\n\nUmbral: **{best.threshold:.2f}**.\n\n"
         f"PR-AUC: **{(best.test_metrics or {})['pr_auc']:.4f}**. F1 incidencia: **{(best.test_metrics or {})['f1_clase_1']:.4f}**. "
         f"Recall incidencia: **{(best.test_metrics or {})['recall_clase_1']:.4f}**.\n\n"
         f"Confiabilidad: **{reliability_level}**.\n",
-        encoding="utf-8",
-    )
-    (OUTPUTS_DIR / "resultados_exposicion.txt").write_text(
-        f"Mejor modelo: {best.model_name}\nUmbral: {best.threshold:.2f}\n"
-        f"Precision incidencia: {(best.test_metrics or {})['precision_clase_1']:.4f}\n"
-        f"Recall incidencia: {(best.test_metrics or {})['recall_clase_1']:.4f}\n"
-        f"F1 incidencia: {(best.test_metrics or {})['f1_clase_1']:.4f}\n"
-        f"PR-AUC: {(best.test_metrics or {})['pr_auc']:.4f}\n"
-        f"Falsos positivos: {(best.test_metrics or {})['falsos_positivos']}\n"
-        f"Falsos negativos: {(best.test_metrics or {})['falsos_negativos']}\n"
-        f"Confiabilidad: {reliability_level}\n",
         encoding="utf-8",
     )
 
@@ -1001,9 +1016,9 @@ def entrenar_modelos() -> ModelResult:
     print("Aporte de SUNAT: revisar outputs/comparacion_aporte_sunat.csv")
     print(f"Nivel de confiabilidad: {reliability(best.test_metrics or {}, float(comparison[comparison['modelo'] == 'DummyClassifier']['pr_auc'].max()))}")
     print("Uso recomendado: priorizar revision manual, no automatizar rechazo.")
-    print("Archivos principales generados: outputs/reporte_final_modelo.txt, outputs/resumen_ejecutivo.md, data/models/modelo_incidencias.joblib")
+    print("Archivos principales generados: outputs/reporte_modelo.txt, outputs/resumen_ejecutivo.md, data/models/modelo_incidencias.joblib")
 
-    end_phase(start, str(OUTPUTS_DIR / "reporte_final_modelo.txt"), "Entrenamiento completado con validacion temporal honesta.")
+    end_phase(start, str(OUTPUTS_DIR / "reporte_modelo.txt"), "Entrenamiento completado con validacion temporal.")
     return best
 
 

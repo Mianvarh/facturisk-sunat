@@ -26,7 +26,6 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
-CONTEXTO_COMPLETO_PARA_IA.md
 
 # Local settings and imported datasets (may contain credentials or private data)
 config/app_settings.json

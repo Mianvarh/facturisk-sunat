@@ -8,10 +8,10 @@ import logging
 import re
 import time
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -166,15 +166,6 @@ def encontrar_url_zip(page_url: str = SUNAT_PAGE_URL) -> str:
     selected = padron_candidates[0] if padron_candidates else candidates[0]
     logging.info("ZIP SUNAT detectado: %s", selected)
     return selected
-
-
-def zip_descargado_hoy(zip_path: Path) -> bool:
-    """Return True when the ZIP exists and was modified today."""
-
-    if not zip_path.exists():
-        return False
-    modified_date = datetime.fromtimestamp(zip_path.stat().st_mtime).date()
-    return modified_date == datetime.now().date()
 
 
 def zip_vigente(zip_path: Path, max_age_days: float) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import json
 import os
@@ -24,7 +25,18 @@ from PIL import Image, ImageTk
 
 from paths import ensure_directories, get_application_root
 from theme import FONT_MEDIUM, FONT_MONO, PALETTE, configure_styles, model_display_name
-from ui_widgets import FitLabel, HeroBanner, NavItem, PillButton, ResponsiveGrid, RoundedCard, ScrollableFrame, StatusPill, card, load_icon
+from ui_widgets import (
+    FitLabel,
+    HeroBanner,
+    NavItem,
+    PillButton,
+    ResponsiveGrid,
+    RoundedCard,
+    ScrollableFrame,
+    StatusPill,
+    card,
+    load_icon,
+)
 
 PROJECT_ROOT = get_application_root()
 SRC_DIR = PROJECT_ROOT / "src"
@@ -189,14 +201,10 @@ def enable_high_dpi() -> None:
     """
 
     if sys.platform == "win32":
-        try:
+        with contextlib.suppress(AttributeError, OSError):
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except (AttributeError, OSError):
-            pass
-        try:
+        with contextlib.suppress(AttributeError, OSError):
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-        except (AttributeError, OSError):
-            pass
 
 
 class FactuRiskApp:
@@ -249,10 +257,8 @@ class FactuRiskApp:
 
         icon_path = ASSETS_DIR / "facturisk.ico"
         if icon_path.exists():
-            try:
+            with contextlib.suppress(tk.TclError):
                 self.root.iconbitmap(default=str(icon_path))
-            except tk.TclError:
-                pass
         logo_path = ASSETS_DIR / "logo.png"
         if logo_path.exists():
             logo = Image.open(logo_path).convert("RGBA")

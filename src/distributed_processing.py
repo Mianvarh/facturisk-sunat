@@ -22,7 +22,6 @@ import pandas as pd
 from datos import iterar_lotes_comprobantes, normalizar_ruc, ruta_comprobantes
 from paths import ensure_directories, get_application_root
 
-
 PROJECT_ROOT = get_application_root()
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"

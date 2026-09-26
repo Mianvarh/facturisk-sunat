@@ -22,18 +22,6 @@ def get_application_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def get_resource_path(*parts: str) -> Path:
-    """Return a path to a bundled or source resource."""
-
-    return get_application_root().joinpath(*parts)
-
-
-def get_writable_path(*parts: str) -> Path:
-    """Return a path intended for outputs, logs, data or config files."""
-
-    return get_application_root().joinpath(*parts)
-
-
 def ensure_directories() -> None:
     """Create the standard writable project directories."""
 

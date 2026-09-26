@@ -16,7 +16,7 @@ class RellenadorNAcategoricas(BaseEstimator, TransformerMixin):
     def __init__(self, categorical_columns: list[str] | tuple[str, ...]):
         self.categorical_columns = categorical_columns
 
-    def fit(self, x: pd.DataFrame, y: pd.Series | None = None) -> "RellenadorNAcategoricas":
+    def fit(self, x: pd.DataFrame, y: pd.Series | None = None) -> RellenadorNAcategoricas:
         """Record categorical columns that are present in the input frame."""
 
         if not isinstance(x, pd.DataFrame):

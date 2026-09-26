@@ -14,8 +14,8 @@ from pymongo.collection import Collection
 from pymongo.errors import BulkWriteError, PyMongoError
 
 from configuracion import PADRON_COLUMNS, cargar_mongo_config
-from fuentes_externas import cargar_variables_padrones
 from datos import SUNAT_BACKUP_CSV, SUNAT_SNAPSHOT_PATH, normalizar_ruc
+from fuentes_externas import cargar_variables_padrones
 from paths import ensure_directories, get_application_root
 
 PROJECT_ROOT = get_application_root()
@@ -259,7 +259,7 @@ def cargar_proveedores_mongodb() -> LoadStats:
             client.close()
 
     print("\nResumen de carga MongoDB")
-    print(f"Registros leidos: {len(df)}")
+    print(f"Registros leidos: {stats.registros_leidos}")
     print(f"Insertados: {stats.insertados}")
     print(f"Actualizados: {stats.actualizados}")
     print(f"Sin cambios: {stats.sin_cambios}")

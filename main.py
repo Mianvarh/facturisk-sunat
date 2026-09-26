@@ -10,14 +10,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-
 SOURCE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = SOURCE_ROOT
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from paths import ensure_directories, get_application_root
+from paths import ensure_directories, get_application_root  # noqa: E402
 
 PROJECT_ROOT = get_application_root()
 SRC_DIR = PROJECT_ROOT / "src"
@@ -34,7 +33,7 @@ PHASE_SCRIPTS = {
     "preparar": PROJECT_ROOT / "src" / "prepare_dataset.py",
     "entrenar": PROJECT_ROOT / "src" / "train_model.py",
     "predecir": PROJECT_ROOT / "src" / "predict_pending.py",
-    "resumen": PROJECT_ROOT / "src" / "show_final_results.py",
+    "resumen": PROJECT_ROOT / "src" / "resumen_resultados.py",
     "documentar": PROJECT_ROOT / "src" / "generate_documentation_data.py",
 }
 
@@ -190,26 +189,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def mostrar_resultados() -> None:
-    """Show key generated result files."""
-
-    print("\nArchivos de resultados y graficos principales:")
-    for path in [
-        OUTPUTS_DIR / "reporte_final_modelo.txt",
-        OUTPUTS_DIR / "resumen_ejecutivo.md",
-        OUTPUTS_DIR / "comparacion_modelos.csv",
-        OUTPUTS_DIR / "comparacion_umbrales.csv",
-        OUTPUTS_DIR / "01_distribucion_clases.png",
-        OUTPUTS_DIR / "04_comparacion_modelos_pr_auc.png",
-        OUTPUTS_DIR / "09_matriz_confusion_optimizada.png",
-        OUTPUTS_DIR / "13_importancia_variables.png",
-        OUTPUTS_DIR / "16_distribucion_riesgo_pendientes.png",
-        PROJECT_ROOT / "data" / "processed" / "predicciones_pendientes.csv",
-    ]:
-        status = "OK" if path.exists() else "NO EXISTE"
-        print(f"  [{status}] {path}")
-
-
 def run_selected_phase(phase: str, force_scraping: bool) -> int:
     """Run one CLI/menu selection through the common subprocess pipeline."""
 
@@ -242,40 +221,34 @@ def run_selected_phase(phase: str, force_scraping: bool) -> int:
 
         if phase == "todo":
             write_message("", log_file)
-            write_message("Mostrando resumen final de resultados...", log_file)
             run_phase("resumen", force_scraping=False, log_file=log_file)
     return 0
 
 
-def menu_interactivo() -> int:
-    """Show the requested interactive menu."""
+MENU_OPTIONS = [
+    ("1", "Inspeccionar datos", "inspect"),
+    ("2", "Procesamiento distribuido", "distribuido"),
+    ("3", "Ejecutar scraping SUNAT", "scraping"),
+    ("4", "Cargar MongoDB", "mongodb"),
+    ("5", "Preparar datos y crear variables", "preparar"),
+    ("6", "Entrenar, optimizar umbral y calibrar", "entrenar"),
+    ("7", "Predecir comprobantes pendientes", "predecir"),
+    ("8", "Mostrar resumen de resultados", "resumen"),
+    ("9", "Ejecutar proceso completo", "todo"),
+    ("10", "Abrir la interfaz gráfica", "gui"),
+]
 
-    options = {
-        "10": ("Abrir interfaz grafica premium", "gui"),
-        "1": ("Inspeccionar datos", "inspect"),
-        "2": ("Procesamiento distribuido", "distribuido"),
-        "3": ("Ejecutar scraping SUNAT", "scraping"),
-        "4": ("Cargar MongoDB", "mongodb"),
-        "5": ("Preparar datos y crear variables", "preparar"),
-        "6": ("Entrenar, optimizar umbral y calibrar", "entrenar"),
-        "7": ("Predecir comprobantes pendientes", "predecir"),
-        "8": ("Mostrar resumen final y gráficos", "resumen"),
-        "9": ("Ejecutar proceso completo", "todo"),
-    }
+
+def menu_interactivo() -> int:
+    """Interactive terminal menu."""
+
+    options = {key: phase for key, _label, phase in MENU_OPTIONS}
     while True:
         print("\n" + "=" * 40)
         print("MENU FACTURISK SUNAT")
         print("=" * 40)
-        print("1. Inspeccionar datos")
-        print("2. Procesamiento distribuido")
-        print("3. Ejecutar scraping SUNAT")
-        print("4. Cargar MongoDB")
-        print("5. Preparar datos y crear variables")
-        print("6. Entrenar, optimizar umbral y calibrar")
-        print("7. Predecir comprobantes pendientes")
-        print("8. Mostrar resumen final y gráficos")
-        print("9. Ejecutar proceso completo")
-        print("10. Abrir interfaz grafica premium")
+        for key, label, _phase in MENU_OPTIONS:
+            print(f"{key}. {label}")
         print("0. Salir")
         try:
             choice = input("Seleccione una opción: ").strip()
@@ -285,7 +258,7 @@ def menu_interactivo() -> int:
         if choice == "0":
             return 0
         if choice in options:
-            run_selected_phase(options[choice][1], force_scraping=False)
+            run_selected_phase(options[choice], force_scraping=False)
         else:
             print("Opción no válida.")
         try:
@@ -336,9 +309,9 @@ def run_worker_phase(phase: str, *, force_scraping: bool = False) -> int:
 
             predecir_pendientes()
         elif phase == "resumen":
-            from show_final_results import mostrar_resumen_final
+            from resumen_resultados import mostrar_resumen
 
-            mostrar_resumen_final(no_gui=False, ask_gui=True)
+            mostrar_resumen()
         elif phase == "documentar":
             from generate_documentation_data import actualizar_documentacion_resultados
 
